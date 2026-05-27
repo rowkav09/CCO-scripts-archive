@@ -23,23 +23,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Run update-categories.js
+        run: |
+          set -e
+          node update-categories.js
+
       - name: Checkout Wiki
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository }}.wiki
           path: wiki
 
-      - name: Update Script Categories in Home.md
+      - name: Copy Home.md to Wiki
         run: |
-          set -e
-          node update-categories.js
+          cp Home.md wiki/Home.md
 
       - name: Commit & Push to Wiki
         run: |
           cd wiki
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .
+          git add Home.md
           git diff --quiet && git diff --staged --quiet || git commit -m "chore: auto-update wiki pages"
           git push
 
