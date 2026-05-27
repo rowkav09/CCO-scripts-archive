@@ -30,7 +30,7 @@
 <!-- LEADERBOARD_START -->
 | Rank | Author | Scripts |
 |---|---|---|
-| 1 | Zhiro | 3 |
+| 1 | Zhiro | 4 |
 <!-- LEADERBOARD_END -->
 
 ---
