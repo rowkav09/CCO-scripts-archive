@@ -30,10 +30,11 @@ jobs:
       - name: Generate Wiki Pages
         run: |
           node scripts/generate-wiki.cjs
+      - name: Show wiki directory contents
+        run: |
+          ls -l wiki
       - name: Publish to GitHub Wiki
-        uses: Andrew-Chen-Wang/github-wiki-action@v4
+        uses: swift-docs/wiki@v1
         with:
           path: wiki
           commit_message: "Automated wiki update"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
