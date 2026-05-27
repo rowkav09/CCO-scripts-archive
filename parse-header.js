@@ -20,7 +20,11 @@ function parseUserScriptHeader(filePath) {
 
     // Fallbacks
     if (!header.name) {
-        header.name = path.basename(filePath).replace('.user.js', '').replace(/-/g, ' ');
+        // Remove .user.js or .js and replace dashes with spaces
+        header.name = path.basename(filePath)
+            .replace(/\.user\.js$/i, '')
+            .replace(/\.js$/i, '')
+            .replace(/-/g, ' ');
     }
     if (!header.description) header.description = 'No description provided';
     if (!header.author) header.author = 'Unknown';
