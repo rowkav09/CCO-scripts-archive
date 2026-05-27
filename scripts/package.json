@@ -1,0 +1,13 @@
+{
+  "name": "cco-scripts-wiki-gen",
+  "version": "1.0.0",
+  "description": "Generates GitHub Wiki pages from scripts metadata.",
+  "main": "generate-wiki.js",
+  "type": "module",
+  "scripts": {
+    "generate-wiki": "node generate-wiki.js"
+  },
+  "author": "rowka",
+  "license": "MIT",
+  "dependencies": {}
+}
