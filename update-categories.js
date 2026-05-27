@@ -11,7 +11,7 @@ const categories = {
 };
 
 const scriptsDir = 'scripts';
-const homePath = 'Home.md';
+const homePath = './wiki/Home.md';
 
 function getScriptsTable(folder, title) {
   const dirPath = path.join(scriptsDir, folder);
