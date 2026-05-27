@@ -29,7 +29,7 @@ jobs:
           npm install --no-save
       - name: Generate Wiki Pages
         run: |
-          node scripts/generate-wiki.js
+          node scripts/generate-wiki.cjs
       - name: Publish to GitHub Wiki
         uses: Andrew-Chen-Wang/github-wiki-action@v4
         with:
