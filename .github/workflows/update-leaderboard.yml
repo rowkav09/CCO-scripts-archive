@@ -1,0 +1,26 @@
+name: Update Leaderboard
+
+on:
+  push:
+    paths:
+      - 'scripts/**'
+      - 'leaderboard-update.js'
+  workflow_dispatch:
+
+jobs:
+  update-leaderboard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run leaderboard update script
+        run: node leaderboard-update.js
+      - name: Commit and push changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: update leaderboard in README.md'
+          file_pattern: README.md
