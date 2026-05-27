@@ -11,7 +11,7 @@
 ### Quick Start
 
 1. Install **Tampermonkey** or **Violentmonkey**
-2. Click **Raw** on any `.user.js` file to install
+2. Click **Raw** on any `.js` file in `scripts` and copy into tampermonkey to install
 
 ---
 
