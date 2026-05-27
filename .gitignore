@@ -1,0 +1,41 @@
+# Node
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
+.history/
+
+# Env
+.env
+.env.*
+
+# Coverage
+coverage/
+
+# Build
+/dist/
+/build/
+
+# Misc
+*.swp
+*.swo
+
+# Python (if any)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Wiki output (if you want to ignore local wiki folder)
+# /wiki/
