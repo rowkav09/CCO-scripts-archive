@@ -32,7 +32,9 @@ jobs:
         run: |
           node scripts/generate-wiki.js
       - name: Publish to GitHub Wiki
-        uses: swift-docs/wiki@v1
+        uses: Andrew-Chen-Wang/github-wiki-action@v4
         with:
           path: wiki
           commit_message: "Automated wiki update"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
