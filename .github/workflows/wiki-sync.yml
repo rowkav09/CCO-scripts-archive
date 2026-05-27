@@ -32,6 +32,7 @@ jobs:
         run: |
           node scripts/generate-wiki.js
       - name: Publish to GitHub Wiki
-        uses: spenserblack/actions-wiki@v1
+        uses: swift-docs/wiki@v1
         with:
           path: wiki
+          commit_message: "Automated wiki update"
