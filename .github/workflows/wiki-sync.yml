@@ -32,6 +32,6 @@ jobs:
           node scripts/generate-wiki.js
 
       - name: Sync Wiki to GitHub Wiki
-        uses: spenserblack/actions-wiki@v2
+        uses: spenserblack/actions-wiki@v1
         with:
           path: wiki
