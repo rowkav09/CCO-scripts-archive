@@ -6,7 +6,6 @@ permissions:
 on:
   push:
     branches: [main]
-    paths: [wiki/**, .github/workflows/wiki-sync.yml]
 
 concurrency:
   group: wiki
