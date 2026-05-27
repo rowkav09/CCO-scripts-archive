@@ -25,7 +25,9 @@ function getScriptsTable(folder, title) {
   for (const file of files) {
     const filePath = path.join(dirPath, file);
     const info = parseUserScriptHeader(filePath);
-    table += `| ${info.name} | ${info.description} | ${info.author} | ${info.version} |\n`;
+    // Use filename without extension for Script Name
+    const scriptName = file.replace(/\.user\.js$/i, '').replace(/\.js$/i, '');
+    table += `| ${scriptName} | ${info.description} | ${info.author} | ${info.version} |\n`;
   }
   return table;
 }
