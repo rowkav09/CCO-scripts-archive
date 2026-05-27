@@ -16,7 +16,10 @@ const homePath = 'Home.md';
 function getScriptsTable(folder, title) {
   const dirPath = path.join(scriptsDir, folder);
   if (!fs.existsSync(dirPath)) return '';
-  const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.user.js')).sort();
+  // Include all .js files except index.js and files starting with '.'
+  const files = fs.readdirSync(dirPath)
+    .filter(f => f.endsWith('.js') && f !== 'index.js' && !f.startsWith('.'))
+    .sort();
   if (files.length === 0) return '';
   let table = `\n#### ${title}\n\n| Script Name | Description | Author | Version |\n|------------|-------------|--------|---------|\n`;
   for (const file of files) {
