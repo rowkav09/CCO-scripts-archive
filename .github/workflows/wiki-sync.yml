@@ -1,34 +1,37 @@
-name: Sync Wiki with Scripts
+name: Publish wiki
+
+permissions:
+  contents: write
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    paths: [wiki/**, .github/workflows/wiki-sync.yml]
+
+concurrency:
+  group: wiki
+  cancel-in-progress: true
 
 jobs:
-  generate-and-sync-wiki:
+  wiki:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install dependencies
         run: |
           cd scripts
           npm install --no-save
-
       - name: Generate Wiki Pages
         run: |
           node scripts/generate-wiki.js
-
-      - name: Sync Wiki to GitHub Wiki
+      - name: Publish to GitHub Wiki
         uses: spenserblack/actions-wiki@v1
         with:
           path: wiki
