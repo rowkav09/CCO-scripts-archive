@@ -1,10 +1,14 @@
 name: Update Wiki
 
+
 on:
   push:
     paths:
       - 'scripts/**'
+      - 'generate-wiki.js'
+      - '.github/workflows/update-wiki.yml'
   workflow_dispatch:
+
 
 permissions:
   contents: write
@@ -26,7 +30,9 @@ jobs:
           path: wiki
 
       - name: Generate Wiki Pages
-        run: node generate-wiki.js
+        run: |
+          set -e
+          node generate-wiki.js
 
       - name: Commit & Push to Wiki
         run: |

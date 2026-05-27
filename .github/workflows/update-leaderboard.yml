@@ -1,13 +1,19 @@
 name: Update Leaderboard
 
+
 on:
   push:
     paths:
       - 'scripts/**'
       - 'leaderboard-update.js'
+      - '.github/workflows/update-leaderboard.yml'
+      - 'README.md'
   workflow_dispatch:
 
-jobs:
+permissions:
+  contents: write
+
+
   update-leaderboard:
     runs-on: ubuntu-latest
     steps:
@@ -18,7 +24,9 @@ jobs:
         with:
           node-version: '20'
       - name: Run leaderboard update script
-        run: node leaderboard-update.js
+        run: |
+          set -e
+          node leaderboard-update.js
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:

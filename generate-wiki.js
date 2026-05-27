@@ -1,8 +1,43 @@
 const fs = require('fs');
 const path = require('path');
 
-// FIXED: Use relative path from .github/scripts/ folder
-const { parseUserScriptHeader } = require('../../scripts/utils/parse-header.js');
+// === Inline Parser (no external file needed) ===
+function parseUserScriptHeader(filePath) {
+    try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const header = {};
+
+        const regex = /@(\w+)\s+(.+)/g;
+        let match;
+
+        while ((match = regex.exec(content)) !== null) {
+            const key = match[1].toLowerCase();
+            header[key] = match[2].trim();
+        }
+
+        if (!header.name) {
+            header.name = path.basename(filePath).replace('.user.js', '').replace(/-/g, ' ');
+        }
+        if (!header.description) header.description = 'No description provided.';
+        if (!header.author) header.author = 'Unknown';
+        if (!header.version) header.version = '1.0.0';
+
+        return {
+            name: header.name,
+            description: header.description,
+            author: header.author,
+            version: header.version
+        };
+    } catch (err) {
+        return {
+            name: path.basename(filePath),
+            description: 'Error reading file',
+            author: 'Unknown',
+            version: '1.0.0'
+        };
+    }
+}
+// === End of Parser ===
 
 const categories = {
   'auto-farm': 'Auto-Farming',
