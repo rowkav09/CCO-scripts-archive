@@ -28,11 +28,9 @@
 ---
 
 <!-- LEADERBOARD_START -->
-### Top Contributors
-
 | Rank | Author | Scripts |
-|------|--------|---------|
-| 1    | Zhiro  | 3       |
+|---|---|---|
+| 1 | Zhiro | 3 |
 <!-- LEADERBOARD_END -->
 
 ---
