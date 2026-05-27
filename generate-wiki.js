@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { parseUserScriptHeader } = require('../../scripts/utils/parse-header.js');
+const { parseUserScriptHeader } = require('./parse-header.js');
 
 const categories = {
   'auto-farm': 'Auto-Farming',
