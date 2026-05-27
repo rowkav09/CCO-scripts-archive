@@ -22,16 +22,6 @@
 | chat-pricebot | !price !pc !su for CCO (i hope it works) . If something goes wrong, check console please. I made the script debug every single thing it does into the console, so if something happens you can dm me the error. (My discord: zhiro999. , don't forget the " . " at the end) | Zhiro | 1.0 |
 
 ---
-| fav | my discord: zhiro999. | Zhiro | 1.1 |
-
-
-#### Pricing
-
-| Script Name | Description | Author | Version |
-|------------|-------------|--------|---------|
-| !price , !pc , !su pricebot | !price !pc !su for CCO (i hope it works) . If something goes wrong, check console please. I made the script debug every single thing it does into the console, so if something happens you can dm me the error. (My discord: zhiro999. , don't forget the " . " at the end) | Zhiro | 1.0 |
-
----
 
 ### Quick Links
 
