@@ -8,6 +8,7 @@ on:
       - 'leaderboard-update.js'
       - '.github/workflows/update-leaderboard.yml'
       - 'README.md'
+      - '*.cjs'
   workflow_dispatch:
 
 permissions:

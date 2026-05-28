@@ -9,6 +9,7 @@ on:
     paths:
       - wiki/**
       - .github/workflows/wiki-sync.yml
+      - '*.cjs'
 
 jobs:
   sync-wiki:
