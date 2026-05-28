@@ -15,8 +15,25 @@ const SCRIPTS_DIR = __dirname;
 const WIKI_DIR = path.join(__dirname, '..', 'wiki');
 const REPO_URL = 'https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts';
 
+
 function getCategoryFileName(category) {
-  return CATEGORY_MAP[category.toLowerCase()] || `${category.charAt(0).toUpperCase() + category.slice(1)}.md`;
+  // Always capitalize first letter, rest lowercase, and use mapping if available
+  const normalized = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
+  return CATEGORY_MAP[category.toLowerCase()] || `${normalized}.md`;
+}
+
+function cleanWikiDuplicates() {
+  const files = fs.readdirSync(WIKI_DIR);
+  const seen = new Set();
+  for (const file of files) {
+    if (!file.endsWith('.md')) continue;
+    const base = file.toLowerCase();
+    if (seen.has(base)) {
+      fs.unlinkSync(path.join(WIKI_DIR, file));
+    } else {
+      seen.add(base);
+    }
+  }
 }
 
 function extractMetadata(filePath) {
@@ -101,7 +118,9 @@ function writeWikiPages(grouped) {
   }
 }
 
+
 function main() {
+  cleanWikiDuplicates();
   const scripts = [];
   scanScripts(SCRIPTS_DIR, '', scripts);
   const grouped = groupByCategory(scripts);

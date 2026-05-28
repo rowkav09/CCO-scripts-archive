@@ -22,7 +22,6 @@ jobs:
         run: |
           ls -l wiki
       - name: Sync wiki folder to GitHub Wiki
-        uses: JamesIves/github-wiki-sync@v1.4.0
+        uses: Andrew-Chen-Wang/github-wiki-action@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          source: wiki
+          path: wiki
