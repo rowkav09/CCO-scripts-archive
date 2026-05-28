@@ -24,11 +24,10 @@ jobs:
           node-version: '20'
       - name: Install dependencies
         run: |
-          cd scripts
           npm install --no-save
       - name: Generate Wiki Pages
         run: |
-          node scripts/generate-wiki.cjs
+          node generate-wiki.js
       - name: Commit and push wiki files
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
