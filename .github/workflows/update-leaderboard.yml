@@ -27,7 +27,7 @@ jobs:
       - name: Update Script Categories in Home.md
         run: |
           set -e
-          node update-categories.js
+          node update-categories.cjs
       - name: Run leaderboard update script
         run: |
           set -e

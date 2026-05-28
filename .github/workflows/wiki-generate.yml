@@ -27,7 +27,7 @@ jobs:
           npm install --no-save
       - name: Generate Wiki Pages
         run: |
-          node generate-wiki.js
+          node generate-wiki.cjs
       - name: Commit and push wiki files
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
