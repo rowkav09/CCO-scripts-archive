@@ -11,7 +11,7 @@ const CATEGORY_MAP = {
   'pricing': 'Pricing.md',
 };
 
-const SCRIPTS_DIR = path.join(__dirname, 'scripts');
+const SCRIPTS_DIR = __dirname;
 const WIKI_DIR = path.join(__dirname, '..', 'wiki');
 const REPO_URL = 'https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts';
 

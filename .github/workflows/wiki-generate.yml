@@ -1,0 +1,36 @@
+name: Generate Wiki Pages
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/**
+      - .github/workflows/wiki-generate.yml
+
+jobs:
+  generate-wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: |
+          cd scripts
+          npm install --no-save
+      - name: Generate Wiki Pages
+        run: |
+          node scripts/generate-wiki.cjs
+      - name: Commit and push wiki files
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: update generated wiki files'
+          file_pattern: wiki/*.md

@@ -1,4 +1,4 @@
-name: Publish wiki
+name: Sync Wiki to GitHub Wiki
 
 permissions:
   contents: write
@@ -6,35 +6,23 @@ permissions:
 on:
   push:
     branches: [main]
-
-concurrency:
-  group: wiki
-  cancel-in-progress: true
+    paths:
+      - wiki/**
+      - .github/workflows/wiki-sync.yml
 
 jobs:
-  wiki:
+  sync-wiki:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Install dependencies
-        run: |
-          cd scripts
-          npm install --no-save
-      - name: Generate Wiki Pages
-        run: |
-          node scripts/generate-wiki.cjs
       - name: Show wiki directory contents
         run: |
           ls -l wiki
-      - name: Publish to GitHub Wiki
-        uses: swift-docs/wiki@v1
+      - name: Sync wiki folder to GitHub Wiki
+        uses: JamesIves/github-wiki-sync@v1.4.0
         with:
-          path: wiki
-          commit_message: "Automated wiki update"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          source: wiki
