@@ -5,26 +5,33 @@ permissions:
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
     paths:
-      - wiki/**
-      - .github/workflows/wiki-sync.yml
-      - '*.cjs'
+      - 'wiki/**'
+      - '.github/workflows/wiki-sync.yml'
+
+  workflow_dispatch:   # Allows manual trigger
 
 jobs:
   sync-wiki:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Show wiki directory contents
-        run: ls -l wiki
+      - name: Show Wiki Directory Contents
+        run: |
+          echo "=== Wiki Directory Contents ==="
+          ls -la wiki/
+          echo "=============================="
 
-      - name: Sync wiki folder to GitHub Wiki
+      - name: Sync wiki/ folder to GitHub Wiki
         uses: Andrew-Chen-Wang/github-wiki-action@v4
         with:
           path: wiki
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: You can set a custom commit message
+          commit_message: "chore: sync wiki from main branch"

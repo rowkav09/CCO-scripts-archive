@@ -5,32 +5,43 @@ permissions:
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
     paths:
-      - scripts/**
-      - .github/workflows/wiki-generate.yml
-      - '*.cjs'
+      - 'scripts/**'
+      - '.github/workflows/wiki-generate.yml'
+      - 'generate-wiki.cjs'
+
+  workflow_dispatch:
 
 jobs:
   generate-wiki:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Install dependencies
-        run: |
-          npm install --no-save
+
       - name: Generate Wiki Pages
+        run: node generate-wiki.cjs
+
+      - name: Commit and Push Wiki Changes (Safe Method)
         run: |
-          node generate-wiki.cjs
-      - name: Commit and push wiki files
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: 'chore: update generated wiki files'
-          file_pattern: wiki/*.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git add wiki/*.md
+          
+          if git diff --staged --quiet; then
+            echo "No changes to wiki files."
+          else
+            git commit -m "chore: update generated wiki files"
+            git push
+            echo "Wiki files successfully updated and pushed."
+          fi
