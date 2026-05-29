@@ -4,4 +4,7 @@
 
 | Script Name | Description | Author | Latest Version |
 |-------------|-------------|--------|----------------|
-| _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ |
+| [chat-filter-protection.js](https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts/utilities/chat-filter-protection.js) | Highlights chat words that would result in a mute and encrypts the word before sending. | ZSB | 2.0 | | [—](https://github.com/rowkav09/CCO-scripts-archive/issues/51) |
+| [float-rank-checker.js](https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts/utilities/float-rank-checker.js) | Find and rank item floats | ZSB | 3.0 | | [—](https://github.com/rowkav09/CCO-scripts-archive/issues/52) |
+| [market-hub.js](https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts/utilities/market-hub.js) | Trading hub, prices, overpay tracking, price votes, Higher or Lower game, Collectors list, Item Offers, and more | ZSB | 3.0 | | [—](https://github.com/rowkav09/CCO-scripts-archive/issues/53) |
+| [profit-loss-tracker.js](https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts/utilities/profit-loss-tracker.js) | profit/loss tracker | ZSB | 1.0 | | [—](https://github.com/rowkav09/CCO-scripts-archive/issues/54) |

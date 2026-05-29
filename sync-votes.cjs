@@ -5,20 +5,45 @@ const REPO = 'rowkav09/CCO-scripts-archive';
 const WIKI_DIR = path.join(__dirname, 'wiki');
 const TOKEN = process.env.GITHUB_TOKEN;
 
+function githubHeaders(useAuth = true) {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'CCO-scripts-archive-sync-votes'
+  };
+  if (useAuth && TOKEN) headers.Authorization = `Bearer ${TOKEN}`;
+  return headers;
+}
+
+async function requestJson(url, { auth = true } = {}) {
+  const res = await fetch(url, { headers: githubHeaders(auth) });
+  const data = await res.json();
+
+  if (res.status === 401 && auth && TOKEN) {
+    return requestJson(url, { auth: false });
+  }
+
+  if (!res.ok) {
+    throw new Error(`Request failed (${res.status}): ${data.message || 'unknown error'}`);
+  }
+
+  return data;
+}
+
 async function fetchVoteIssues() {
-  const res = await fetch(
-    `https://api.github.com/repos/${REPO}/issues?labels=vote&state=open&per_page=100`,
-    { headers: { Authorization: `Bearer ${TOKEN}`, Accept: 'application/vnd.github+json' } }
+  const data = await requestJson(
+    `https://api.github.com/repos/${REPO}/issues?labels=vote&state=open&per_page=100`
   );
-  return res.json();
+  if (!Array.isArray(data)) {
+    throw new Error(`Unexpected vote issues payload: ${JSON.stringify(data).slice(0, 200)}`);
+  }
+  return data;
 }
 
 async function fetchRatingsFromComments(issueNumber) {
-  const res = await fetch(
-    `https://api.github.com/repos/${REPO}/issues/${issueNumber}/comments`,
-    { headers: { Authorization: `Bearer ${TOKEN}`, Accept: 'application/vnd.github+json' } }
-  );
-  const comments = await res.json();
+  const comments = await requestJson(`https://api.github.com/repos/${REPO}/issues/${issueNumber}/comments`);
+  if (!Array.isArray(comments)) {
+    throw new Error(`Unexpected comments payload for issue ${issueNumber}: ${JSON.stringify(comments).slice(0, 200)}`);
+  }
 
   // Keep latest numeric rating (0-10) per user
   const latestByUser = new Map();
@@ -76,24 +101,31 @@ async function main() {
     }
   }
 
-    // Create Top-Scripts leaderboard
-    const leaderboard = [];
-    for (const [scriptName, { avg, count }] of Object.entries(votes)) {
-      if (count > 0) leaderboard.push({ scriptName, avg, count });
+  // Create a full repository-wide ranking page.
+  const allScripts = listAllScripts();
+  const ranked = allScripts.map(({ scriptName, category, url }) => {
+    const vote = votes[scriptName] || { avg: 0, count: 0 };
+    return { scriptName, category, url, avg: vote.avg, count: vote.count };
+  }).sort((a, b) => {
+    const aRated = a.count > 0;
+    const bRated = b.count > 0;
+    if (aRated !== bRated) return aRated ? -1 : 1;
+    if (aRated && bRated) {
+      return b.avg - a.avg || b.count - a.count || a.scriptName.localeCompare(b.scriptName);
     }
-    leaderboard.sort((a, b) => b.avg - a.avg || b.count - a.count);
+    return a.scriptName.localeCompare(b.scriptName);
+  });
 
-    if (leaderboard.length) {
-      const rows = ['| Rank | Script | Rating | Votes |', '|------|--------|--------:|------:|'];
-      for (let i = 0; i < Math.min(20, leaderboard.length); i++) {
-        const e = leaderboard[i];
-        const url = findScriptUrl(e.scriptName) || '#';
-        rows.push(`| ${i+1} | [${e.scriptName}](${url}) | ${e.avg.toFixed(1)} / 10 | ${e.count} |`);
-      }
-      const content = `# Top Scripts\n\n${rows.join('\n')}\n\n*Generated from script vote issues*`;
-      fs.writeFileSync(path.join(WIKI_DIR, 'Top-Scripts.md'), content);
-      console.log('Updated Top-Scripts.md');
-    }
+  const rows = ['| Rank | Script | Category | Rating | Votes |', '|------|--------|----------|--------:|------:|'];
+  ranked.forEach((entry, index) => {
+    const ratingText = entry.count > 0 ? `${entry.avg.toFixed(1)} / 10` : '—';
+    const votesText = entry.count > 0 ? String(entry.count) : '0';
+    rows.push(`| ${index + 1} | [${entry.scriptName}](${entry.url}) | ${entry.category} | ${ratingText} | ${votesText} |`);
+  });
+
+  const leaderboardContent = `# Top Scripts\n\nAll scripts in the repository ranked by user votes. Scripts without votes are listed at the bottom until they receive ratings.\n\n${rows.join('\n')}\n\n*Generated from script vote issues*`;
+  fs.writeFileSync(path.join(WIKI_DIR, 'Top-Scripts.md'), leaderboardContent);
+  console.log('Updated Top-Scripts.md');
 }
 
 function escapeRegex(str) {
@@ -112,6 +144,31 @@ function findScriptUrl(scriptName) {
     }
   }
   return null;
+}
+
+function listAllScripts() {
+  const scriptsRoot = path.join(__dirname, 'scripts');
+  if (!fs.existsSync(scriptsRoot)) return [];
+
+  const folders = fs.readdirSync(scriptsRoot)
+    .filter(entry => fs.statSync(path.join(scriptsRoot, entry)).isDirectory())
+    .sort((left, right) => left.localeCompare(right));
+
+  const entries = [];
+  for (const folder of folders) {
+    const categoryDir = path.join(scriptsRoot, folder);
+    const files = fs.readdirSync(categoryDir)
+      .filter(file => file.endsWith('.js') && !file.startsWith('.'))
+      .sort((left, right) => left.localeCompare(right));
+
+    for (const file of files) {
+      const scriptName = file;
+      const url = `https://github.com/rowkav09/CCO-scripts-archive/blob/main/${path.join('scripts', folder, file).replace(/\\/g, '/')}`;
+      entries.push({ scriptName, category: folder, url });
+    }
+  }
+
+  return entries;
 }
 
 main().catch(console.error);
