@@ -4,7 +4,7 @@ on:
   push:
     paths:
       - 'scripts/**/*.js'
-  workflow_dispatch:
+  workflow_dispatch:     # Manual trigger recommended
 
 permissions:
   issues: write
@@ -19,32 +19,48 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Find Changed or New Scripts
-        id: changed-scripts
-        uses: tj-actions/changed-files@v45
-        with:
-          files: scripts/**/*.js
-
-      - name: Create Vote Issues
+      - name: Create Vote Issues for All Scripts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          for file in ${{ steps.changed-scripts.outputs.all_changed_files }}; do
-            if [[ $file == *.js ]]; then
-              script_name=$(basename "$file")
-              
-              issue_exists=$(gh issue list --search "[Vote] $script_name" --state open --json number -q '.[0].number' || echo "")
+          echo "🔍 Scanning for .js scripts..."
 
-              if [ -z "$issue_exists" ]; then
-                echo "Creating vote issue for: $script_name"
-                
-                gh issue create \
-                  --title "[Vote] $script_name" \
-                  --body "React with 👍 to upvote this script.\n\n**Script Path:** \`$file\`\n\n**How to vote:**\n- 👍 = Upvote / Like this script\n- 👎 = Downvote\n\nThe vote counts will be automatically shown in the Wiki." \
-                  --label "vote" \
-                  --repo rowkav09/CCO-scripts-archive
-              else
-                echo "Vote issue already exists for $script_name"
-              fi
+          # Find ALL .js files in scripts folder
+          mapfile -t script_files < <(find scripts -type f -name "*.js" | sort)
+
+          echo "Found ${#script_files[@]} script files"
+
+          for file in "${script_files[@]}"; do
+            script_name=$(basename "$file")
+            
+            echo "Checking: $script_name"
+
+            # Check if vote issue already exists
+            issue_exists=$(gh issue list \
+              --search "\"[Vote] $script_name\"" \
+              --state open \
+              --json number \
+              -q 'length([])' || echo "0")
+
+            if [ "$issue_exists" = "0" ]; then
+              echo "✅ Creating vote issue for: $script_name"
+              
+              gh issue create \
+                --title "[Vote] $script_name" \
+                --body "React with 👍 to upvote this script.
+
+**Script Path:** \`$file\`
+
+**How to vote:**
+- 👍 = Upvote / Recommend this script
+- 👎 = Downvote
+
+Vote counts will be shown automatically in the Wiki." \
+                --label "vote" \
+                --repo rowkav09/CCO-scripts-archive
+            else
+              echo "⏭️  Vote issue already exists for $script_name"
             fi
           done
+
+          echo "✅ Vote issue creation process completed."
