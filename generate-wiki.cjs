@@ -5,7 +5,7 @@ const path = require('path');
 
 const CATEGORY_MAP = {
   'auto-farm': 'Auto-Farming.md',
-  'qol': 'QOL.md',
+  'qol': 'Qol.md',
   'utilities': 'Utilities.md',
   'enhancements': 'Enhancements.md',
   'misc': 'Misc.md',
