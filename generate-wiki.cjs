@@ -4,6 +4,10 @@ const path = require('path');
 const SCRIPTS_DIR = path.join(__dirname, '../scripts');
 const WIKI_DIR = path.join(__dirname, '../wiki');
 
+console.log("🔍 Starting Wiki Generator Debug");
+console.log("Scripts directory:", SCRIPTS_DIR);
+console.log("Exists?", fs.existsSync(SCRIPTS_DIR));
+
 const CATEGORY_MAP = {
   'auto-farm': 'Auto Farming',
   'qol': 'Quality of Life',
@@ -15,57 +19,54 @@ const CATEGORY_MAP = {
 
 function main() {
   if (!fs.existsSync(SCRIPTS_DIR)) {
-    console.error("❌ Scripts directory not found!");
+    console.error("❌ Scripts folder not found!");
     return;
   }
-
-  if (!fs.existsSync(WIKI_DIR)) fs.mkdirSync(WIKI_DIR, { recursive: true });
 
   const categories = fs.readdirSync(SCRIPTS_DIR)
     .filter(dir => fs.statSync(path.join(SCRIPTS_DIR, dir)).isDirectory());
 
-  let totalScripts = 0;
-  const categoryData = {};
+  console.log("📂 Found categories:", categories);
 
-  // Count scripts per category
+  let totalScripts = 0;
+  let content = `# CCO Scripts Archive - Wiki\n\n`;
+  content += `**Central hub to discover all open-source scripts for Case Clicker Online.**\n\n`;
+  content += `![Last Updated](https://img.shields.io/github/last-commit/rowkav09/CCO-scripts-archive)\n`;
+  content += `![Total Scripts](https://img.shields.io/badge/Total%20Scripts-0-brightgreen)\n\n`;
+
+  content += `### 📂 Script Categories\n\n`;
+  content += `| Category | Description | Scripts | Browse |\n`;
+  content += `|----------|-------------|---------|--------|\n`;
+
   for (const cat of categories) {
     const catDir = path.join(SCRIPTS_DIR, cat);
-    const files = fs.readdirSync(catDir)
-                    .filter(f => f.endsWith('.js'));
-    categoryData[cat] = {
-      count: files.length,
-      title: CATEGORY_MAP[cat.toLowerCase()] || cat
-    };
-    totalScripts += files.length;
+    console.log(`\nChecking folder: scripts/${cat}`);
+
+    let files = fs.readdirSync(catDir);
+    console.log(`  All files found:`, files);
+
+    const jsFiles = files.filter(f => f.endsWith('.js'));
+    console.log(`  .js files found:`, jsFiles);
+
+    const count = jsFiles.length;
+    totalScripts += count;
+
+    const title = CATEGORY_MAP[cat.toLowerCase()] || cat;
+
+    content += `| **${title}** | Scripts for ${cat} | ${count} | [[${title}]] |\n`;
+
+    console.log(`  → ${title}: ${count} scripts`);
   }
 
-  // === Generate Home.md with updated counts ===
-  let homeContent = `# CCO Scripts Archive - Wiki\n\n`;
-  homeContent += `**Central hub to discover all open-source scripts for Case Clicker Online.**\n\n`;
-  homeContent += `![Last Updated](https://img.shields.io/github/last-commit/rowkav09/CCO-scripts-archive)\n`;
-  homeContent += `![Total Scripts](https://img.shields.io/badge/Total%20Scripts-${totalScripts}-brightgreen)\n\n`;
+  content = content.replace(
+    /Total%20Scripts-0-brightgreen/, 
+    `Total%20Scripts-${totalScripts}-brightgreen`
+  );
 
-  homeContent += `### Script Categories\n\n`;
-  homeContent += `| Category | Description | Scripts | Browse |\n`;
-  homeContent += `|----------|-------------|---------|--------|\n`;
+  if (!fs.existsSync(WIKI_DIR)) fs.mkdirSync(WIKI_DIR, { recursive: true });
+  fs.writeFileSync(path.join(WIKI_DIR, 'Home.md'), content);
 
-  for (const cat of categories) {
-    const data = categoryData[cat];
-    const desc = data.title.includes('Farming') ? 'Auto clickers, openers, and sellers' :
-                 data.title.includes('Life') ? 'UI improvements and shortcuts' :
-                 data.title.includes('Pricing') ? 'Price checkers and value tools' :
-                 data.title.includes('Utilities') ? 'Export tools, stats, and analyzers' : 'Other useful scripts';
-
-    homeContent += `| **${data.title}** | ${desc} | ${data.count} | [[${data.title}]] |\n`;
-  }
-
-  homeContent += `\n---\n\n`;
-  homeContent += `**Made with ❤️ for the Case Clicker community** · [← Back to Repository](https://github.com/rowkav09/CCO-scripts-archive)`;
-
-  fs.writeFileSync(path.join(WIKI_DIR, 'Home.md'), homeContent);
-
-  console.log(`✅ Wiki generated! Total Scripts: ${totalScripts}`);
-  console.log('Category counts updated successfully.');
+  console.log(`\n✅ Finished! Total scripts counted: ${totalScripts}`);
 }
 
 main();
