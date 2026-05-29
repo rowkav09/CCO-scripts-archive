@@ -41,4 +41,4 @@ jobs:
           commit_message: 'chore: update leaderboard and Script Categories'
           file_pattern: |
             README.md
-            Home.md
+            wiki/Home.md

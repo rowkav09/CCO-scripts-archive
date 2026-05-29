@@ -34,7 +34,7 @@ jobs:
             
             echo "Checking: $script_name"
 
-            issue_exists=$(gh issue list --search "[Vote] $script_name" --state open --json number -q 'length([])' || echo "0")
+            issue_exists=$(gh issue list --state open --limit 1000 --json title --jq "map(select(.title == \"[Vote] ${script_name}\")) | length" || echo "0")
 
             if [ "$issue_exists" = "0" ]; then
               echo "✅ Creating vote issue for: $script_name"

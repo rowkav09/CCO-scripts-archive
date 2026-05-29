@@ -19,11 +19,12 @@
 
 | Category           | Description                                      | Folder |
 |--------------------|--------------------------------------------------|--------|
-| **Auto Farming**   | Auto clickers, openers, sellers, and farms       | [`scripts/auto-farm`](scripts/auto-farm) |
-| **Quality of Life**| UI/UX improvements and shortcuts                 | [`scripts/QoL`](scripts/QoL) |
-| **Pricing**        | Price checkers and item value tools              | [`scripts/pricing`](scripts/pricing) |
-| **Utilities**      | Export tools, stats, analyzers                   | [`scripts/utilities`](scripts/utilities) |
-| **Misc**           | Other useful or experimental scripts             | [`scripts/misc`](scripts/misc) |
+| **Auto-Farm**      | Scripts that automate repetitive actions and grind loops | [`scripts/auto-farm`](scripts/auto-farm) |
+| **Gaming**         | Custom game systems, mode improvements, and stats        | [`scripts/gaming`](scripts/gaming) |
+| **UI**             | Themes, overlays, and visual client improvements         | [`scripts/ui`](scripts/ui) |
+| **Enhancements**   | Extra features that do not fit another bucket cleanly    | [`scripts/enhancements`](scripts/enhancements) |
+| **Bots**           | Trading, external-service automation, and server tools   | [`scripts/bots`](scripts/bots) |
+| **Utilities**      | Tracking, chat tools, float tools, and general helpers   | [`scripts/utilities`](scripts/utilities) |
 
 ---
 

@@ -8,11 +8,12 @@ Thank you for wanting to contribute!
 
 1. **Fork** this repository
 2. Create a new file in the correct category folder:
-   - `scripts/auto-farm/`
-   - `scripts/QoL/`
-   - `scripts/pricing/`
-   - `scripts/utilities/`
-   - `scripts/misc/`
+    - `scripts/auto-farm/`
+    - `scripts/gaming/`
+    - `scripts/ui/`
+    - `scripts/enhancements/`
+    - `scripts/bots/`
+    - `scripts/utilities/`
 3. Name your file descriptively, e.g. `ultra-clicker.user.js`
 4. Add the proper UserScript header (see template below)
 5. Test your script on https://case-clicker.com/

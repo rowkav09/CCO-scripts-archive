@@ -1,19 +1,20 @@
 # CCO Scripts Archive - Wiki
 
-**Central hub to discover all open-source scripts for Case Clicker Online.**
+**Browse the scripts by category and jump straight to the relevant wiki page.**
 
 **Last Updated:** Auto-updated on each change  
-**Total Scripts:** 5
+**Total Scripts:** 20
 
-### Script Categories
+### Categories
 
 | Category | Description | Scripts | Browse |
 |----------|-------------|---------|--------|
-| **Auto Farming** | Auto clickers, openers, and sellers | 5 | [[Auto Farming]] |
-| **Utilities** | Export tools, stats, and analyzers | 4 | [[Utilities]] |
-| **Enhancements** | Visual and feature enhancements | 5 | [[Enhancements]] |
-| **Pricing** | Price checkers and value tools | 3 | [[Pricing]] |
-| **Quality of Life** | UI improvements and shortcuts | 3 | [[Quality of Life]] |
+| **Auto-Farm** | Scripts designed to automate repetitive actions, speed up grinding, bulk actions, or reduce manual gameplay effort. | 4 | [[Auto-Farm]] |
+| **Gaming** | Game-focused scripts that add custom game systems, improve existing modes, add statistics, or create entirely new gameplay experiences. | 3 | [[Gaming]] |
+| **UI** | Themes, overlays, interface redesigns, wallpapers, custom displays, and visual improvements for the client. | 3 | [[UI]] |
+| **Enhancements** | Extra features and upgrades that improve the overall experience without fully fitting into other categories. | 2 | [[Enhancements]] |
+| **Bots** | Scripts or systems that interact with external services, automated trading, deposits/withdrawals, or server-connected features. | 5 | [[Bots]] |
+| **Utilities** | Helpful tools for pricing, tracking, chat features, float checking, inventory management, and general quality-of-life improvements. | 3 | [[Utilities]] |
 
 ---
 

@@ -1,14 +1,14 @@
 const fs = require('fs');
 const path = require('path');
-const { parseUserScriptHeader } = require('./parse-header.cjs');
 
-const categories = {
-  'auto-farm': 'Auto-Farming',
-  'QoL': 'Quality-of-Life',
-  'pricing': 'Pricing',
-  'utilities': 'Utilities',
-  'misc': 'Misc'
-};
+const categories = [
+  { label: 'Auto-Farm', folder: 'auto-farm', wikiPage: 'Auto-Farming' },
+  { label: 'Gaming', folder: 'gaming', wikiPage: 'Gaming' },
+  { label: 'UI', folder: 'ui', wikiPage: 'UI' },
+  { label: 'Enhancements', folder: 'enhancements', wikiPage: 'Enhancements' },
+  { label: 'Bots', folder: 'bots', wikiPage: 'Bots' },
+  { label: 'Utilities', folder: 'utilities', wikiPage: 'Utilities' }
+];
 
 const scriptsDir = 'scripts';
 const homePath = path.join('wiki', 'Home.md');
@@ -36,11 +36,12 @@ function updateCategoriesSection(homeContent) {
   const after = homeContent.slice(end);
 
   const rows = [
-    ['Auto Farming',    'Auto clickers, openers, and sellers', 'auto-farm', 'Auto-Farming'],
-    ['Quality of Life', 'UI improvements and shortcuts',        'quality-of-life', 'Quality of Life'],
-    ['Pricing',         'Price checkers and value tools',       'pricing',   'Pricing'],
-    ['Utilities',       'Export tools, stats, and analyzers',   'utilities', 'Utilities'],
-    ['Misc',            'Other useful scripts',                 'misc',      'Misc'],
+    ['Auto-Farm', 'Scripts designed to automate repetitive actions, speed up grinding, bulk actions, or reduce manual gameplay effort.', 'auto-farm', 'Auto-Farm'],
+    ['Gaming', 'Game-focused scripts that add custom game systems, improve existing modes, add statistics, or create entirely new gameplay experiences.', 'gaming', 'Gaming'],
+    ['UI', 'Themes, overlays, interface redesigns, wallpapers, custom displays, and visual improvements for the client.', 'ui', 'UI'],
+    ['Enhancements', 'Extra features and upgrades that improve the overall experience without fully fitting into other categories.', 'enhancements', 'Enhancements'],
+    ['Bots', 'Scripts or systems that interact with external services, automated trading, deposits/withdrawals, or server-connected features.', 'bots', 'Bots'],
+    ['Utilities', 'Helpful tools for pricing, tracking, chat features, float checking, inventory management, and general quality-of-life improvements.', 'utilities', 'Utilities']
   ];
 
   let table = '\n| Category | Description | Scripts | Browse |\n|----------|-------------|---------|--------|\n';
