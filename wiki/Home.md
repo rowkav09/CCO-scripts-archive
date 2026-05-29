@@ -2,9 +2,10 @@
 
 **Central hub to discover all open-source scripts for Case Clicker Online.**
 
-![Total Scripts](https://img.shields.io/badge/Total%20Scripts-5-brightgreen)
+**Last Updated:** Auto-updated on each change  
+**Total Scripts:** 5
 
-### Script Categories
+### 📂 Script Categories
 
 | Category | Description | Scripts | Browse |
 |----------|-------------|---------|--------|
@@ -12,3 +13,7 @@
 | **Quality of Life** | UI improvements and shortcuts | 1 | [[Quality of Life]] |
 | **Utilities** | Export tools, stats, and analyzers | 2 | [[Utilities]] |
 | **Pricing** | Price checkers and value tools | 1 | [[Pricing]] |
+
+---
+
+**Made with ❤️ for the Case Clicker community**
