@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         fav
+// @name         Case Clicker Favorites Manager
 // @namespace    http://tampermonkey.net/
 // @version      1.1
-// @description  my discord: zhiro999.
+// @description  Add, organize, rename, and quickly access your favorite cases and game modes with a draggable favorites menu.
 // @author       Zhiro
 // @match        https://case-clicker.com/*
 // @grant        none
