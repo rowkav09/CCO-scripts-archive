@@ -40,7 +40,7 @@ function main() {
   content += `**Last Updated:** Auto-updated on each change  \n`;
   content += `**Total Scripts:** 5\n\n`;
 
-  content += `### 📂 Script Categories\n\n`;
+  content += `### Script Categories\n\n`;
   content += `| Category | Description | Scripts | Browse |\n`;
   content += `|----------|-------------|---------|--------|\n`;
 

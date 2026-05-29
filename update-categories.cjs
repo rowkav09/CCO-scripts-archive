@@ -37,7 +37,7 @@ function updateCategoriesSection(homeContent) {
 
   const rows = [
     ['Auto Farming',    'Auto clickers, openers, and sellers', 'auto-farm', 'Auto-Farming'],
-    ['Quality of Life', 'UI improvements and shortcuts',        'QoL',       'Qol'],
+    ['Quality of Life', 'UI improvements and shortcuts',        'quality-of-life', 'Quality of Life'],
     ['Pricing',         'Price checkers and value tools',       'pricing',   'Pricing'],
     ['Utilities',       'Export tools, stats, and analyzers',   'utilities', 'Utilities'],
     ['Misc',            'Other useful scripts',                 'misc',      'Misc'],
