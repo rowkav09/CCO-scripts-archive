@@ -40,13 +40,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
+          # ensure pushes use HTTPS with the workflow token (avoid SSH)
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
           git add -A wiki
-          
+
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
             git commit -m "chore: update generated wiki files"
-            git push
+            git push origin HEAD:${{ github.ref_name }}
             echo "Wiki files committed and pushed"
           fi
 
