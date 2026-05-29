@@ -35,18 +35,6 @@
 
 ---
 
-### Most Popular Scripts
-
-These are the **top 3 most used / recommended** scripts based on community feedback and downloads:
-
-1. **[Auto Farm Pro](scripts/auto-farm/auto-farm-pro.user.js)** — Best all-in-one auto clicker + opener
-2. **[Smart Case Opener](scripts/auto-farm/smart-opener.user.js)** — Opens cases efficiently with logic
-3. **[Live Price Checker](scripts/pricing/live-price-checker.user.js)** — Real-time item valuation
-
-> *Want your script here? Make it high quality and get community feedback!*
-
----
-
 ### How to Install
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/)
