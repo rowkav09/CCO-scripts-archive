@@ -2,10 +2,9 @@
 
 **Central hub to discover all open-source scripts for Case Clicker Online.**
 
-![Last Updated](https://img.shields.io/github/last-commit/rowkav09/CCO-scripts-archive)
 ![Total Scripts](https://img.shields.io/badge/Total%20Scripts-5-brightgreen)
 
-### 📂 Script Categories
+### Script Categories
 
 | Category | Description | Scripts | Browse |
 |----------|-------------|---------|--------|
