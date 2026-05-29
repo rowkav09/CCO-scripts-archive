@@ -1,4 +1,4 @@
-name: Generate Wiki Pages
+name: Generate & Sync Wiki
 
 permissions:
   contents: write
@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  generate-wiki:
+  generate-and-sync:
     runs-on: ubuntu-latest
 
     steps:
@@ -31,7 +31,7 @@ jobs:
       - name: Generate Wiki Pages
         run: node generate-wiki.cjs
 
-      - name: Commit and Push Wiki Changes (Safe)
+      - name: Commit Wiki Changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -39,9 +39,15 @@ jobs:
           git add wiki/*.md
           
           if git diff --staged --quiet; then
-            echo "✅ No changes to commit"
+            echo "No changes to commit"
           else
             git commit -m "chore: update generated wiki files"
             git push
-            echo "✅ Wiki files committed and pushed successfully"
+            echo "Wiki files committed and pushed"
           fi
+
+      - name: Sync to GitHub Wiki
+        uses: Andrew-Chen-Wang/github-wiki-action@v4
+        with:
+          path: wiki
+          token: ${{ secrets.GITHUB_TOKEN }}
