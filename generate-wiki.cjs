@@ -10,7 +10,7 @@ const CATEGORY_SPECS = [
     folder: 'auto-farm',
     page: 'Auto-Farming.md',
     title: 'Auto-Farm',
-    browseLabel: 'Auto-Farm',
+    browseLabel: 'Auto-Farming',
     description: 'Scripts designed to automate repetitive actions, speed up grinding, bulk actions, or reduce manual gameplay effort.'
   },
   {
