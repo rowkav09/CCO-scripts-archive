@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const SCRIPTS_DIR = path.join(__dirname, '../scripts');   // Adjusted path
+const SCRIPTS_DIR = path.join(__dirname, '../scripts');
 const WIKI_DIR = path.join(__dirname, '../wiki');
 
 const CATEGORY_MAP = {
@@ -17,7 +17,6 @@ function parseHeader(filePath) {
   try {
     const content = fs.readFileSync(filePath, 'utf8');
     const header = {};
-
     const regex = /@(\w+)\s+(.+)/gi;
     let match;
     while ((match = regex.exec(content)) !== null) {
@@ -25,7 +24,7 @@ function parseHeader(filePath) {
     }
 
     return {
-      name: header.name || path.basename(filePath),
+      name: header.name || path.basename(filePath).replace('.js', ''),
       description: header.description || 'No description provided.',
       author: header.author || 'Unknown',
       version: header.version || '1.0'
@@ -36,6 +35,11 @@ function parseHeader(filePath) {
 }
 
 function main() {
+  if (!fs.existsSync(SCRIPTS_DIR)) {
+    console.error("Scripts directory not found!");
+    return;
+  }
+
   if (!fs.existsSync(WIKI_DIR)) fs.mkdirSync(WIKI_DIR, { recursive: true });
 
   const categories = fs.readdirSync(SCRIPTS_DIR).filter(dir => 
@@ -43,34 +47,39 @@ function main() {
   );
 
   let homeContent = `# CCO Scripts Archive - Wiki\n\n`;
+  homeContent += `**Central hub to discover all open-source scripts for Case Clicker Online.**\n\n`;
   homeContent += `![Last Updated](https://img.shields.io/github/last-commit/rowkav09/CCO-scripts-archive)\n\n`;
-  homeContent += `### Script Categories\n\n`;
-  homeContent += `| Category | Scripts | Browse |\n|----------|---------|--------|\n`;
+  homeContent += `### 📂 Script Categories\n\n`;
+  homeContent += `| Category | Description | Scripts | Browse |\n`;
+  homeContent += `|----------|-------------|---------|--------|\n`;
 
   for (const cat of categories) {
     const catDir = path.join(SCRIPTS_DIR, cat);
-    const files = fs.readdirSync(catDir).filter(f => f.endsWith('.js'));
+    const files = fs.readdirSync(catDir)
+                    .filter(f => f.endsWith('.js'))
+                    .sort();
 
-    const title = CATEGORY_MAP[cat.toLowerCase()] || cat;
-    homeContent += `| **${title}** | ${files.length} | [[${title}]] |\n`;
+    const scriptCount = files.length;
+    const title = CATEGORY_MAP[cat.toLowerCase()] || cat.charAt(0).toUpperCase() + cat.slice(1);
 
-    // Generate category page
-    let content = `# ${title}\n\n`;
-    content += `Auto-generated on ${new Date().toISOString().split('T')[0]}\n\n`;
-    content += `| Script Name | Description | Author | Version |\n`;
-    content += `|-------------|-------------|--------|---------|\n`;
+    homeContent += `| **${title}** | ${CATEGORY_MAP[cat.toLowerCase()] ? 'Scripts for ' + cat : 'Various scripts'} | ${scriptCount} | [[${title}]] |\n`;
+
+    // Generate Category Page
+    let catContent = `# ${title}\n\n`;
+    catContent += `Auto-generated on ${new Date().toISOString().split('T')[0]}\n\n`;
+    catContent += `| Script Name | Description | Author | Version |\n`;
+    catContent += `|-------------|-------------|--------|---------|\n`;
 
     for (const file of files) {
       const meta = parseHeader(path.join(catDir, file));
       const rawUrl = `https://raw.githubusercontent.com/rowkav09/CCO-scripts-archive/main/scripts/${cat}/${file}`;
-      content += `| [${meta.name}](${file}) | ${meta.description} | ${meta.author} | ${meta.version} |\n`;
+      catContent += `| [${meta.name}](${file}) | ${meta.description} | ${meta.author} | ${meta.version} | [Install](${rawUrl}) |\n`;
     }
 
-    fs.writeFileSync(path.join(WIKI_DIR, `${title}.md`), content);
+    fs.writeFileSync(path.join(WIKI_DIR, `${title}.md`), catContent);
   }
 
   fs.writeFileSync(path.join(WIKI_DIR, 'Home.md'), homeContent);
-  console.log('✅ Wiki generated successfully');
+  console.log('✅ Wiki generated successfully with updated script counts!');
 }
 
-main();
