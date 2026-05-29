@@ -10,9 +10,9 @@
 | Category | Description | Scripts | Browse |
 |----------|-------------|---------|--------|
 | **Auto Farming** | Auto clickers, openers, and sellers | 1 | [[Auto Farming]] |
-| **Quality of Life** | UI improvements and shortcuts | 1 | [[Quality of Life]] |
 | **Utilities** | Export tools, stats, and analyzers | 2 | [[Utilities]] |
 | **Pricing** | Price checkers and value tools | 1 | [[Pricing]] |
+| **Quality of Life** | UI improvements and shortcuts | 1 | [[Quality of Life]] |
 
 ---
 
