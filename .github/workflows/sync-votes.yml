@@ -1,6 +1,10 @@
 name: Sync Vote Counts
 
 on:
+  push:
+    paths:
+      - 'sync-votes.cjs'
+      - '.github/workflows/sync-votes.yml'
   schedule:
     - cron: '0 * * * *'  # every hour
   workflow_dispatch:

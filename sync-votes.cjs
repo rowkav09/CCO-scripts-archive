@@ -86,12 +86,11 @@ async function main() {
       );
 
       updated = updated.replace(rowRegex, (row) => {
-        // Remove old thumbs or rating cell if present
-        let stripped = row.replace(/\s*\|\s*\[👍[^|]*\]\([^)]*\)\s*\|?$/, '');
-        stripped = stripped.replace(/\s*\|\s*\[?\d+(?:\.\d+)?\s*\/\s*10[^|]*\]\([^)]*\)\s*\|?$/, '');
-
+        const cells = row.split('|');
+        if (cells.length < 7) return row;
         const display = (count > 0) ? `${avg.toFixed(1)} / 10 (${count})` : '—';
-        return `${stripped} | [${display}](${url}) |`;
+        cells[cells.length - 2] = ` [${display}](${url}) `;
+        return cells.join('|');
       });
     }
 

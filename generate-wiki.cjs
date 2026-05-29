@@ -51,7 +51,7 @@ const CATEGORY_SPECS = [
 ];
 
 const CATEGORY_BY_FOLDER = new Map(CATEGORY_SPECS.map(spec => [spec.folder, spec]));
-const WIKI_FILES = new Set(['Home.md', ...CATEGORY_SPECS.map(spec => spec.page)]);
+const WIKI_FILES = new Set(['Home.md', 'Top-Scripts.md', ...CATEGORY_SPECS.map(spec => spec.page)]);
 
 function readScripts(folder) {
   const categoryDir = path.join(SCRIPTS_DIR, folder);
@@ -76,13 +76,13 @@ function buildCategoryPage(spec) {
 
   let content = `# ${spec.title}\n\n`;
   content += `**${spec.description}**\n\n`;
-  content += `| Script Name | Description | Author | Latest Version |\n`;
-  content += `|-------------|-------------|--------|----------------|\n`;
+    content += `| Script Name | Description | Author | Latest Version | Rating |\n`;
+    content += `|-------------|-------------|--------|----------------|--------|\n`;
 
   if (rows.length === 0) {
-    content += `| _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ |\n`;
+     content += `| _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ |\n`;
   } else {
-    content += `${rows.join('\n')}\n`;
+    content += `${rows.map(row => `${row.replace(/\s*\|\s*$/, '')} | — |`).join('\n')}\n`;
   }
 
   return { content, scriptCount: rows.length };
