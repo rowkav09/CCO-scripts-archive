@@ -1,5 +1,5 @@
 name: Script Vote
-description: Vote on a script using reactions
+description: Vote on a script by commenting a numeric rating (0-10)
 title: "[Vote] "
 labels: ["vote"]
 body:
@@ -7,5 +7,5 @@ body:
     attributes:
       value: |
         ## Vote for this script
-        React with 👍 to upvote or 👎 to downvote.
+        Please comment a single number between 0 and 10 (e.g. `8` or `10`). Only your latest numeric comment will be counted.
         The leaderboard updates automatically.
