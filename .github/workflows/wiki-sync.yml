@@ -10,7 +10,7 @@ on:
       - 'wiki/**'
       - '.github/workflows/wiki-sync.yml'
 
-  workflow_dispatch:   # Allows manual trigger
+  workflow_dispatch:
 
 jobs:
   sync-wiki:
@@ -23,15 +23,10 @@ jobs:
           fetch-depth: 0
 
       - name: Show Wiki Directory Contents
-        run: |
-          echo "=== Wiki Directory Contents ==="
-          ls -la wiki/
-          echo "=============================="
+        run: ls -la wiki/
 
       - name: Sync wiki/ folder to GitHub Wiki
         uses: Andrew-Chen-Wang/github-wiki-action@v4
         with:
           path: wiki
           token: ${{ secrets.GITHUB_TOKEN }}
-          # Optional: You can set a custom commit message
-          commit_message: "chore: sync wiki from main branch"
