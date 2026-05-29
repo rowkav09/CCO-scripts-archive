@@ -53,18 +53,36 @@ const CATEGORY_SPECS = [
 const CATEGORY_BY_FOLDER = new Map(CATEGORY_SPECS.map(spec => [spec.folder, spec]));
 const WIKI_FILES = new Set(['Home.md', 'Top-Scripts.md', ...CATEGORY_SPECS.map(spec => spec.page)]);
 
+function resolveCategoryDir(folder) {
+  const exactPath = path.join(SCRIPTS_DIR, folder);
+  if (fs.existsSync(exactPath)) {
+    return { dirName: folder, dirPath: exactPath };
+  }
+
+  const match = fs.readdirSync(SCRIPTS_DIR).find(entry => {
+    const entryPath = path.join(SCRIPTS_DIR, entry);
+    return fs.statSync(entryPath).isDirectory() && entry.toLowerCase() === folder.toLowerCase();
+  });
+
+  if (!match) {
+    return null;
+  }
+
+  return { dirName: match, dirPath: path.join(SCRIPTS_DIR, match) };
+}
+
 function readScripts(folder) {
-  const categoryDir = path.join(SCRIPTS_DIR, folder);
+  const category = resolveCategoryDir(folder);
 
-  if (!fs.existsSync(categoryDir)) return [];
+  if (!category) return [];
 
-  return fs.readdirSync(categoryDir)
+  return fs.readdirSync(category.dirPath)
     .filter(file => file.endsWith('.js') && !file.startsWith('.'))
     .sort((left, right) => left.localeCompare(right))
     .map(file => {
-      const filePath = path.join(categoryDir, file);
+      const filePath = path.join(category.dirPath, file);
       const header = parseUserScriptHeader(filePath);
-      const relativePath = path.join('scripts', folder, file).replace(/\\/g, '/');
+      const relativePath = path.join('scripts', category.dirName, file).replace(/\\/g, '/');
       const url = `https://github.com/rowkav09/CCO-scripts-archive/blob/main/${relativePath}`;
 
       return `| [${header.filename}](${url}) | ${header.description} | ${header.author} | ${header.version} |`;
