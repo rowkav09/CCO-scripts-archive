@@ -25,6 +25,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: pull latest changes
+        run: git pull
       - name: Update Script Categories in Home.md
         run: |
           set -e
