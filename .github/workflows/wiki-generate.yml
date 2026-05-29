@@ -8,6 +8,7 @@ on:
     branches: [ main ]
     paths:
       - 'scripts/**'
+      - 'wiki/**'
       - '.github/workflows/wiki-generate.yml'
       - 'generate-wiki.cjs'
 
