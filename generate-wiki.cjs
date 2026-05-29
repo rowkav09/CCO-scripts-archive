@@ -6,7 +6,7 @@ const WIKI_DIR = path.join(__dirname, 'wiki');
 
 const CATEGORY_MAP = {
   'auto-farm': 'Auto Farming',
-  'qol': 'Quality of Life',
+  'quality-of-life': 'Quality of Life',
   'pricing': 'Pricing',
   'utilities': 'Utilities',
   'misc': 'Misc',
@@ -15,7 +15,7 @@ const CATEGORY_MAP = {
 
 const CATEGORY_DESC = {
   'auto-farm': 'Auto clickers, openers, and sellers',
-  'qol': 'UI improvements and shortcuts',
+  'quality-of-life': 'UI improvements and shortcuts',
   'pricing': 'Price checkers and value tools',
   'utilities': 'Export tools, stats, and analyzers',
   'misc': 'Other useful scripts',
