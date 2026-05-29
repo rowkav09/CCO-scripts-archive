@@ -387,4 +387,4 @@
     log(`Started | CPC: ${currentCpc}% | $${totals.money.toFixed(2)} | ${totals.cases} cases`, "#f59e0b");
     scheduleRefresh();
     tick();
-})();
+})();\n// ci-trigger: create-vote-issues\n
