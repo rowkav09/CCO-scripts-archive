@@ -1,0 +1,11 @@
+name: Script Vote
+description: Vote on a script using reactions
+title: "[Vote] "
+labels: ["vote"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Vote for this script
+        React with 👍 to upvote or 👎 to downvote.
+        The leaderboard updates automatically.

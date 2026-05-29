@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 
 // Category mapping for output filenames
-
 const CATEGORY_MAP = {
   'auto-farm': 'Auto-Farming.md',
   'qol': 'Qol.md',
@@ -21,6 +20,9 @@ const CATEGORY_DESCRIPTIONS = {
   'pricing': 'Scripts related to pricing, value, and market analysis.',
 };
 
+// Files that should never be deleted by this script
+const PROTECTED_FILES = new Set(['Home.md']);
+
 const SCRIPTS_DIR = path.join(__dirname, 'scripts');
 const WIKI_DIR = path.join(__dirname, 'wiki');
 const REPO_URL = 'https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts';
@@ -33,20 +35,6 @@ function getCategoryFileName(category) {
 
 function getCategoryDescription(category) {
   return CATEGORY_DESCRIPTIONS[category.toLowerCase()] || 'Scripts for this category.';
-}
-
-function cleanWikiDuplicates() {
-  const files = fs.readdirSync(WIKI_DIR);
-  const seen = new Set();
-  for (const file of files) {
-    if (!file.endsWith('.md')) continue;
-    const base = file.toLowerCase();
-    if (seen.has(base)) {
-      fs.unlinkSync(path.join(WIKI_DIR, file));
-    } else {
-      seen.add(base);
-    }
-  }
 }
 
 function extractMetadata(filePath) {
@@ -69,6 +57,7 @@ function extractMetadata(filePath) {
     if (versionMatch) version = versionMatch[1].trim();
     if (foundDescription && author !== 'Unknown' && version !== '1.0') break;
   }
+
   if (!description) {
     // Fallback: first non-empty comment line
     for (const line of lines) {
@@ -79,16 +68,17 @@ function extractMetadata(filePath) {
       }
     }
   }
+
   if (!description) description = 'No description.';
   return { description, author, version };
 }
-
 
 function scanScriptsForCategories(baseDir) {
   // Only scan direct subfolders as categories
   const categories = fs.readdirSync(baseDir, { withFileTypes: true })
     .filter(entry => entry.isDirectory())
     .map(entry => entry.name);
+
   const scriptsByCategory = {};
   for (const category of categories) {
     const catDir = path.join(baseDir, category);
@@ -111,46 +101,35 @@ function scanScriptsForCategories(baseDir) {
   return scriptsByCategory;
 }
 
-function groupByCategory(scripts) {
-  const grouped = {};
-  for (const script of scripts) {
-    // Always use normalized category
-    const cat = script.category.toLowerCase();
-    if (!grouped[cat]) grouped[cat] = [];
-    grouped[cat].push(script);
-  }
-  return grouped;
-}
-
 function generateTable(scripts) {
-  let table = `| Script Name | Description | Author | Latest Version |\n|-------------|-------------|--------|----------------|\n`;
+  let table = `| Script Name | Description | Author | Latest Version | Votes |\n|-------------|-------------|--------|----------------|-------|\n`;
   for (const s of scripts) {
     const url = `${REPO_URL}/${s.relPath}`;
-    table += `| [${s.name}](${url}) | ${s.description} | ${s.author} | ${s.version} |\n`;
+    table += `| [${s.name}](${url}) | ${s.description} | ${s.author} | ${s.version} | - |\n`;
   }
   return table;
 }
 
-
 function writeWikiPages(scriptsByCategory) {
   if (!fs.existsSync(WIKI_DIR)) fs.mkdirSync(WIKI_DIR);
-  // Remove wiki pages for categories that no longer exist
+
+  // Remove wiki pages for categories that no longer exist,
+  // but never delete protected files like Home.md
   const validFiles = new Set(Object.keys(scriptsByCategory).map(cat => getCategoryFileName(cat)));
   for (const file of fs.readdirSync(WIKI_DIR)) {
-    if (file.endsWith('.md') && !validFiles.has(file)) {
+    if (file.endsWith('.md') && !validFiles.has(file) && !PROTECTED_FILES.has(file)) {
       fs.unlinkSync(path.join(WIKI_DIR, file));
     }
   }
+
   // Write or update wiki pages for each category
   for (const [cat, scripts] of Object.entries(scriptsByCategory)) {
     const fileName = getCategoryFileName(cat);
     const filePath = path.join(WIKI_DIR, fileName);
     let content = '';
     if (scripts.length > 0) {
-      // If there are scripts, write the table
       content = generateTable(scripts);
     } else {
-      // Boilerplate for empty category
       const header = `# ${fileName.replace('.md', '')}\n\n`;
       const desc = getCategoryDescription(cat) + '\n\n---\n\n### Available Scripts\n\n';
       const table = '| Script Name | Description | Author | Latest Version |\n|-------------|-------------|--------|----------------|\n';
@@ -160,9 +139,7 @@ function writeWikiPages(scriptsByCategory) {
   }
 }
 
-
 function main() {
-  // Only use actual script subfolders as categories
   const scriptsByCategory = scanScriptsForCategories(SCRIPTS_DIR);
   writeWikiPages(scriptsByCategory);
   console.log('Wiki pages generated.');

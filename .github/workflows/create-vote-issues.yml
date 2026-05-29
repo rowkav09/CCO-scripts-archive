@@ -1,0 +1,50 @@
+name: Create Vote Issues for Scripts
+
+on:
+  push:
+    paths:
+      - 'scripts/**/*.js'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  create-vote-issues:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find Changed or New Scripts
+        id: changed-scripts
+        uses: tj-actions/changed-files@v45
+        with:
+          files: scripts/**/*.js
+
+      - name: Create Vote Issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for file in ${{ steps.changed-scripts.outputs.all_changed_files }}; do
+            if [[ $file == *.js ]]; then
+              script_name=$(basename "$file")
+              
+              issue_exists=$(gh issue list --search "[Vote] $script_name" --state open --json number -q '.[0].number' || echo "")
+
+              if [ -z "$issue_exists" ]; then
+                echo "Creating vote issue for: $script_name"
+                
+                gh issue create \
+                  --title "[Vote] $script_name" \
+                  --body "React with 👍 to upvote this script.\n\n**Script Path:** \`$file\`\n\n**How to vote:**\n- 👍 = Upvote / Like this script\n- 👎 = Downvote\n\nThe vote counts will be automatically shown in the Wiki." \
+                  --label "vote" \
+                  --repo rowkav09/CCO-scripts-archive
+              else
+                echo "Vote issue already exists for $script_name"
+              fi
+            fi
+          done
