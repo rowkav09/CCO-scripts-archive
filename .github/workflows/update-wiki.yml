@@ -1,0 +1,31 @@
+name: Update GitHub Wiki
+
+on:
+  workflow_run:
+    workflows:
+      - Generate & Sync Wiki
+      - Sync Vote Counts
+      - Update Leaderboard
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-wiki:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync to GitHub Wiki
+        uses: Andrew-Chen-Wang/github-wiki-action@v4
+        with:
+          path: wiki
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -52,9 +52,3 @@ jobs:
             git push origin HEAD:${{ github.ref_name }}
             echo "Wiki files committed and pushed"
           fi
-
-      - name: Sync to GitHub Wiki
-        uses: Andrew-Chen-Wang/github-wiki-action@v4
-        with:
-          path: wiki
-          token: ${{ secrets.GITHUB_TOKEN }}
