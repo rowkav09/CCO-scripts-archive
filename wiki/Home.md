@@ -5,7 +5,7 @@
 **Last Updated:** Auto-updated on each change  
 **Total Scripts:** 5
 
-### 📂 Script Categories
+### Script Categories
 
 | Category | Description | Scripts | Browse |
 |----------|-------------|---------|--------|
