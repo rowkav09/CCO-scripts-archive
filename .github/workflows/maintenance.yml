@@ -1,0 +1,107 @@
+name: Repository Maintenance
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/**'
+      - 'wiki/**'
+      - 'README.md'
+      - '*.cjs'
+      - '.github/workflows/maintenance.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: repo-write
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generate Wiki Pages
+        run: node generate-wiki.cjs
+
+      - name: Update Wiki Categories
+        run: node update-categories.cjs
+
+      - name: Create Vote Issues for All Scripts
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Scanning for .js scripts..."
+
+          mapfile -t script_files < <(find scripts -type f -name "*.js" | sort)
+
+          echo "Found ${#script_files[@]} script files"
+
+          for file in "${script_files[@]}"; do
+            script_name=$(basename "$file")
+
+            echo "Checking: $script_name"
+
+            issue_exists=$(gh issue list --state open --limit 1000 --json title --jq "map(select(.title == \"[Vote] ${script_name}\")) | length" || echo "0")
+
+            if [ "$issue_exists" = "0" ]; then
+              echo "Creating vote issue for: $script_name"
+
+              gh issue create \
+                --title "[Vote] $script_name" \
+                --body "Please comment a numeric rating 0-10 for this script. Only your latest numeric comment will be counted.\n\n**Script Path:** \`$file\`\n\n**How to vote:**\n- Comment a single number between 0 and 10 (e.g. \`8\` or \`10\`)\n- To change your rating, post another numeric comment; only your latest numeric vote counts\n\nA leaderboard and per-category ratings will be generated automatically in the Wiki." \
+                --label "vote" \
+                --repo rowkav09/CCO-scripts-archive
+            else
+              echo "Vote issue already exists for $script_name"
+            fi
+          done
+
+          echo "Vote issue creation process completed."
+
+      - name: Sync Vote Counts
+        run: node sync-votes.cjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Leaderboard
+        run: node leaderboard-update.cjs
+
+      - name: Commit Changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+          git add -A README.md wiki
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update generated wiki files"
+            git push origin HEAD:${{ github.ref_name }}
+            echo "Repository files committed and pushed"
+          fi
+
+      - name: Sync to GitHub Wiki
+        uses: Andrew-Chen-Wang/github-wiki-action@v4
+        with:
+          path: wiki
+          token: ${{ secrets.GITHUB_TOKEN }}
