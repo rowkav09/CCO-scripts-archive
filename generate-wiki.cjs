@@ -85,7 +85,7 @@ function readScripts(folder) {
       const relativePath = path.join('scripts', category.dirName, file).replace(/\\/g, '/');
       const url = `https://github.com/rowkav09/CCO-scripts-archive/blob/main/${relativePath}`;
 
-      return `| [${header.filename}](${url}) | ${header.description} | ${header.author} | ${header.version} |`;
+      return `| [${header.name}](${url}) | ${header.description} | ${header.author} | ${header.version} |`;
     });
 }
 

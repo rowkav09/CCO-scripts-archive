@@ -30,24 +30,34 @@ async function requestJson(url, { auth = true } = {}) {
 }
 
 async function fetchVoteIssues() {
-  const data = await requestJson(
-    `https://api.github.com/repos/${REPO}/issues?labels=vote&state=open&per_page=100`
-  );
-  if (!Array.isArray(data)) {
-    throw new Error(`Unexpected vote issues payload: ${JSON.stringify(data).slice(0, 200)}`);
+  const all = [];
+  for (let page = 1; page <= 10; page++) {
+    const data = await requestJson(
+      `https://api.github.com/repos/${REPO}/issues?labels=vote&state=open&per_page=100&page=${page}`
+    );
+    if (!Array.isArray(data)) {
+      throw new Error(`Unexpected vote issues payload: ${JSON.stringify(data).slice(0, 200)}`);
+    }
+    all.push(...data);
+    if (data.length < 100) break;
   }
-  return data;
+  return all;
 }
 
 async function fetchRatingsFromComments(issueNumber) {
-  const comments = await requestJson(`https://api.github.com/repos/${REPO}/issues/${issueNumber}/comments`);
-  if (!Array.isArray(comments)) {
-    throw new Error(`Unexpected comments payload for issue ${issueNumber}: ${JSON.stringify(comments).slice(0, 200)}`);
+  const allComments = [];
+  for (let page = 1; page <= 20; page++) {
+    const comments = await requestJson(`https://api.github.com/repos/${REPO}/issues/${issueNumber}/comments?per_page=100&page=${page}`);
+    if (!Array.isArray(comments)) {
+      throw new Error(`Unexpected comments payload for issue ${issueNumber}: ${JSON.stringify(comments).slice(0, 200)}`);
+    }
+    allComments.push(...comments);
+    if (comments.length < 100) break;
   }
 
   // Keep latest numeric rating (0-10) per user
   const latestByUser = new Map();
-  for (const c of comments) {
+  for (const c of allComments) {
     const m = c.body && c.body.match(/^\s*(10|[0-9])\s*$/m);
     if (m) latestByUser.set(c.user.login, parseInt(m[1], 10));
   }
