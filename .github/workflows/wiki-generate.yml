@@ -14,6 +14,10 @@ on:
 
   workflow_dispatch:
 
+concurrency:
+  group: repo-write
+  cancel-in-progress: false
+
 jobs:
   generate-and-sync:
     runs-on: ubuntu-latest

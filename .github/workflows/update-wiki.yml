@@ -6,6 +6,10 @@ on:
       - 'wiki/**'
   workflow_dispatch:
 
+concurrency:
+  group: repo-write
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
