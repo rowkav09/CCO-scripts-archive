@@ -32,7 +32,7 @@
 | Rank | Author | Scripts |
 |---|---|---|
 | 1 | ZSB | 15 |
-| 2 | Zhiro | 5 |
+| 2 | Zhiro | 6 |
 <!-- LEADERBOARD_END -->
 
 ---
