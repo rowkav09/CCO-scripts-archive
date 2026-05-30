@@ -4,6 +4,6 @@
 
 | Script Name | Description | Author | Latest Version | Rating |
 |-------------|-------------|--------|----------------|--------|
-| [CCO Emoji Plugin v1](https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts/ui/emoji-plugin.js) | emoji haha 😄 | ZSB | 1.0 | [8.0 / 10 (1)](https://github.com/rowkav09/CCO-scripts-archive/issues/65) |
-| [the real and based CCO Experience beta v5](https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts/ui/ultimate-cco-themer-beta.js) | Wallpapers, themes, cb teams and chat features | ZSB | 5.0 | [—](https://github.com/rowkav09/CCO-scripts-archive/issues/66) |
-| [The definitive cco experience](https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts/ui/ultimate-cco-themer.js) | Wallpapers, themes, cb teams and chat features | ZSB | 1.0 | [—](https://github.com/rowkav09/CCO-scripts-archive/issues/67) |
+| [CCO Emoji Plugin v1](https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts/ui/emoji-plugin.js) | emoji haha 😄 | ZSB | 1.0 | — |
+| [the real and based CCO Experience beta v5](https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts/ui/ultimate-cco-themer-beta.js) | Wallpapers, themes, cb teams and chat features | ZSB | 5.0 | — |
+| [The definitive cco experience](https://github.com/rowkav09/CCO-scripts-archive/blob/main/scripts/ui/ultimate-cco-themer.js) | Wallpapers, themes, cb teams and chat features | ZSB | 1.0 | — |
