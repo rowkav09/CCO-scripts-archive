@@ -66,7 +66,7 @@ jobs:
 
               gh issue create \
                 --title "[Vote] $script_name" \
-                --body "Please comment a numeric rating 0-10 for this script. Only your latest numeric comment will be counted.\n\n**Script Path:** \`$file\`\n\n**How to vote:**\n- Comment a single number between 0 and 10 (e.g. \`8\` or \`10\`)\n- To change your rating, post another numeric comment; only your latest numeric vote counts\n\nA leaderboard and per-category ratings will be generated automatically in the Wiki." \
+                --body "Please comment a numeric rating 0-10 for this script. Only your latest numeric comment will be counted.\n\n**Script:** [\`$file\`](https://github.com/rowkav09/CCO-scripts-archive/blob/main/$file)\n\n**How to vote:**\n- Comment a single number between 0 and 10 (e.g. \`8\` or \`10\`)\n- To change your rating, post another numeric comment; only your latest numeric vote counts\n\nA leaderboard and per-category ratings will be generated automatically in the Wiki." \
                 --label "vote" \
                 --repo rowkav09/CCO-scripts-archive
             else

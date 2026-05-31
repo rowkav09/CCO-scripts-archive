@@ -71,14 +71,16 @@ async function fetchRatingsFromComments(issueNumber) {
 async function main() {
   const issues = await fetchVoteIssues();
 
-  // Build a map of script name -> vote counts
+  // Build maps of script name -> vote counts and vote issue URLs.
   const votes = {};
+  const issueUrls = {};
   for (const issue of issues) {
     const match = issue.title.match(/^\[Vote\]\s+(.+)/);
     if (!match) continue;
     const scriptName = match[1].trim();
     const { avg, count } = await fetchRatingsFromComments(issue.number);
     votes[scriptName] = { avg, count, url: issue.html_url };
+    issueUrls[scriptName] = issue.html_url;
   }
 
   // Inject vote counts into each wiki page
@@ -114,7 +116,14 @@ async function main() {
   const allScripts = listAllScripts();
   const ranked = allScripts.map(({ scriptName, category, url }) => {
     const vote = votes[scriptName] || { avg: 0, count: 0 };
-    return { scriptName, category, url, avg: vote.avg, count: vote.count };
+    return {
+      scriptName,
+      category,
+      url,
+      issueUrl: issueUrls[scriptName],
+      avg: vote.avg,
+      count: vote.count
+    };
   }).sort((a, b) => {
     const aRated = a.count > 0;
     const bRated = b.count > 0;
@@ -125,16 +134,17 @@ async function main() {
     return a.scriptName.localeCompare(b.scriptName);
   });
 
-  const rows = ['| Rank | Script | Category | Rating | Votes |', '|------|--------|----------|--------:|------:|'];
+  const rows = ['| Rank | Script | Issue | Category | Rating | Votes |', '|------|--------|-------|----------|--------:|------:|'];
   ranked.forEach((entry, index) => {
     const ratingText = entry.count > 0 ? `${entry.avg.toFixed(1)} / 10` : '—';
     const votesText = entry.count > 0 ? String(entry.count) : '0';
-    rows.push(`| ${index + 1} | [${entry.scriptName}](${entry.url}) | ${entry.category} | ${ratingText} | ${votesText} |`);
+    const issueText = entry.issueUrl ? `[Vote Issue](${entry.issueUrl})` : '—';
+    rows.push(`| ${index + 1} | [${entry.scriptName}](${entry.url}) | ${issueText} | ${entry.category} | ${ratingText} | ${votesText} |`);
   });
 
-  const leaderboardContent = `# Top Scripts\n\nAll scripts in the repository ranked by user votes. Scripts without votes are listed at the bottom until they receive ratings.\n\n${rows.join('\n')}\n\n*Generated from script vote issues*`;
-  fs.writeFileSync(path.join(WIKI_DIR, 'Top-Scripts.md'), leaderboardContent);
-  console.log('Updated Top-Scripts.md');
+  const leaderboardContent = `# Leaderboard\n\nAll scripts in the repository ranked by user votes. Scripts without votes are listed at the bottom until they receive ratings.\n\n${rows.join('\n')}\n\n*Generated from script vote issues*`;
+  fs.writeFileSync(path.join(WIKI_DIR, 'Leaderboard.md'), leaderboardContent);
+  console.log('Updated Leaderboard.md');
 }
 
 function escapeRegex(str) {

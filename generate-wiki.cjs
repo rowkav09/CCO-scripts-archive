@@ -51,7 +51,7 @@ const CATEGORY_SPECS = [
 ];
 
 const CATEGORY_BY_FOLDER = new Map(CATEGORY_SPECS.map(spec => [spec.folder, spec]));
-const WIKI_FILES = new Set(['Home.md', 'Top-Scripts.md', ...CATEGORY_SPECS.map(spec => spec.page)]);
+const WIKI_FILES = new Set(['Home.md', 'Leaderboard.md', ...CATEGORY_SPECS.map(spec => spec.page)]);
 
 function resolveCategoryDir(folder) {
   const exactPath = path.join(SCRIPTS_DIR, folder);
@@ -139,6 +139,8 @@ function main() {
 
   let homeContent = `# CCO Scripts Archive - Wiki\n\n`;
   homeContent += `**Browse the scripts by category and jump straight to the relevant wiki page.**\n\n`;
+  homeContent += `### Leaderboard\n\n`;
+  homeContent += `See the full repository ranking, including scripts with no votes, on the [[Leaderboard]] page.\n\n`;
   homeContent += `**Last Updated:** Auto-updated on each change  \n`;
   homeContent += `**Total Scripts:** ${totalScripts}\n\n`;
   homeContent += `### Categories\n\n`;

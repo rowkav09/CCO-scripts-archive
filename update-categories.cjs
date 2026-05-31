@@ -32,7 +32,7 @@ function updateCategoriesSection(homeContent) {
     const after = homeContent.slice(end);
 
     const rows = [
-      ['Auto-Farm', 'Scripts designed to automate repetitive actions, speed up grinding, bulk actions, or reduce manual gameplay effort.', 'auto-farm', 'Auto-Farm'],
+      ['Auto-Farm', 'Scripts designed to automate repetitive actions, speed up grinding, bulk actions, or reduce manual gameplay effort.', 'auto-farm', 'Auto-Farming'],
       ['Gaming', 'Game-focused scripts that add custom game systems, improve existing modes, add statistics, or create entirely new gameplay experiences.', 'gaming', 'Gaming'],
       ['UI', 'Themes, overlays, interface redesigns, wallpapers, custom displays, and visual improvements for the client.', 'ui', 'UI'],
       ['Enhancements', 'Extra features and upgrades that improve the overall experience without fully fitting into other categories.', 'enhancements', 'Enhancements'],
@@ -59,7 +59,7 @@ function updateCategoriesSection(homeContent) {
       const after = homeContent.slice(nextSection);
 
       const rows = [
-        ['Auto-Farm', 'Scripts designed to automate repetitive actions, speed up grinding, bulk actions, or reduce manual gameplay effort.', 'auto-farm', 'Auto-Farm'],
+        ['Auto-Farm', 'Scripts designed to automate repetitive actions, speed up grinding, bulk actions, or reduce manual gameplay effort.', 'auto-farm', 'Auto-Farming'],
         ['Gaming', 'Game-focused scripts that add custom game systems, improve existing modes, add statistics, or create entirely new gameplay experiences.', 'gaming', 'Gaming'],
         ['UI', 'Themes, overlays, interface redesigns, wallpapers, custom displays, and visual improvements for the client.', 'ui', 'UI'],
         ['Enhancements', 'Extra features and upgrades that improve the overall experience without fully fitting into other categories.', 'enhancements', 'Enhancements'],
