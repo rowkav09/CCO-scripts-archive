@@ -4,6 +4,7 @@ const path = require('path');
 const REPO = 'rowkav09/CCO-scripts-archive';
 const WIKI_DIR = path.join(__dirname, 'wiki');
 const TOKEN = process.env.GITHUB_TOKEN;
+const CATEGORY_ORDER = ['auto-farm', 'bots', 'enhancements', 'gaming', 'ui', 'utilities'];
 
 function githubHeaders(useAuth = true) {
   const headers = {
@@ -131,6 +132,9 @@ async function main() {
     if (aRated && bRated) {
       return b.avg - a.avg || b.count - a.count || a.scriptName.localeCompare(b.scriptName);
     }
+    const aCategoryIndex = CATEGORY_ORDER.indexOf(a.category);
+    const bCategoryIndex = CATEGORY_ORDER.indexOf(b.category);
+    if (aCategoryIndex !== bCategoryIndex) return aCategoryIndex - bCategoryIndex;
     return a.scriptName.localeCompare(b.scriptName);
   });
 
