@@ -53,6 +53,32 @@ const CATEGORY_SPECS = [
 const CATEGORY_BY_FOLDER = new Map(CATEGORY_SPECS.map(spec => [spec.folder, spec]));
 const WIKI_FILES = new Set(['Home.md', 'Leaderboard.md', ...CATEGORY_SPECS.map(spec => spec.page)]);
 
+function isScriptFile(file) {
+  return (file.endsWith('.js') || file.endsWith('.user.js')) && file !== 'index.js' && !file.startsWith('.');
+}
+
+function collectScriptFiles(dirPath, relativeDir = '') {
+  return fs.readdirSync(dirPath, { withFileTypes: true })
+    .flatMap(entry => {
+      if (entry.name.startsWith('.')) {
+        return [];
+      }
+
+      const entryPath = path.join(dirPath, entry.name);
+      const entryRelativePath = relativeDir ? path.join(relativeDir, entry.name) : entry.name;
+
+      if (entry.isDirectory()) {
+        return collectScriptFiles(entryPath, entryRelativePath);
+      }
+
+      if (!isScriptFile(entry.name)) {
+        return [];
+      }
+
+      return [{ filePath: entryPath, relativePath: entryRelativePath }];
+    });
+}
+
 function resolveCategoryDir(folder) {
   const exactPath = path.join(SCRIPTS_DIR, folder);
   if (fs.existsSync(exactPath)) {
@@ -76,14 +102,12 @@ function readScripts(folder) {
 
   if (!category) return [];
 
-  return fs.readdirSync(category.dirPath)
-    .filter(file => file.endsWith('.js') && !file.startsWith('.'))
-    .sort((left, right) => left.localeCompare(right))
-    .map(file => {
-      const filePath = path.join(category.dirPath, file);
+  return collectScriptFiles(category.dirPath)
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath))
+    .map(({ filePath, relativePath }) => {
       const header = parseUserScriptHeader(filePath);
-      const relativePath = path.join('scripts', category.dirName, file).replace(/\\/g, '/');
-      const url = `https://github.com/rowkav09/CCO-scripts-archive/blob/main/${relativePath}`;
+      const urlPath = path.join('scripts', folder, relativePath).replace(/\\/g, '/');
+      const url = `https://github.com/rowkav09/CCO-scripts-archive/blob/main/${urlPath}`;
 
       return `| [${header.name}](${url}) | ${header.description} | ${header.author} | ${header.version} |`;
     });

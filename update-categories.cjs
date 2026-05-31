@@ -13,11 +13,31 @@ const categories = [
 const scriptsDir = 'scripts';
 const homePath = path.join('wiki', 'Home.md');
 
+function isScriptFile(file) {
+  return (file.endsWith('.js') || file.endsWith('.user.js')) && file !== 'index.js' && !file.startsWith('.');
+}
+
+function collectScriptFiles(dirPath) {
+  return fs.readdirSync(dirPath, { withFileTypes: true })
+    .flatMap(entry => {
+      if (entry.name.startsWith('.')) {
+        return [];
+      }
+
+      const entryPath = path.join(dirPath, entry.name);
+
+      if (entry.isDirectory()) {
+        return collectScriptFiles(entryPath);
+      }
+
+      return isScriptFile(entry.name) ? [entryPath] : [];
+    });
+}
+
 function countScripts(folder) {
   const dirPath = path.join(scriptsDir, folder);
   if (!fs.existsSync(dirPath)) return 0;
-  return fs.readdirSync(dirPath)
-    .filter(f => f.endsWith('.js') && f !== 'index.js' && !f.startsWith('.')).length;
+  return collectScriptFiles(dirPath).length;
 }
 
 function updateCategoriesSection(homeContent) {
