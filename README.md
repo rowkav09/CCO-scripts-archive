@@ -31,8 +31,9 @@
 <!-- LEADERBOARD_START -->
 | Rank | Author | Scripts |
 |---|---|---|
-| 1 | ZSB | 15 |
-| 2 | Zhiro | 8 |
+| 1 | ZSB | 16 |
+| 2 | Zhiro | 9 |
+| 3 | chunkycheese | 5 |
 <!-- LEADERBOARD_END -->
 
 ---
