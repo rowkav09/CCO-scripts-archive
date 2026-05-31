@@ -4,7 +4,6 @@
 
 [![Last Updated](https://img.shields.io/github/last-commit/rowkav09/CCO-scripts-archive)](https://github.com/rowkav09/CCO-scripts-archive)
 [![Stars](https://img.shields.io/github/stars/rowkav09/CCO-scripts-archive)](https://github.com/rowkav09/CCO-scripts-archive/stargazers)
-[![License](https://img.shields.io/github/license/rowkav09/CCO-scripts-archive)](LICENSE)
 
 ---
 
