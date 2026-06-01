@@ -52,6 +52,7 @@ const CATEGORY_SPECS = [
 
 const CATEGORY_BY_FOLDER = new Map(CATEGORY_SPECS.map(spec => [spec.folder, spec]));
 const WIKI_FILES = new Set(['Home.md', 'Leaderboard.md', ...CATEGORY_SPECS.map(spec => spec.page)]);
+const BROKEN_ISSUE_TEMPLATE = 'script-not-working.yml';
 
 function isScriptFile(file) {
   return (file.endsWith('.js') || file.endsWith('.user.js')) && file !== 'index.js' && !file.startsWith('.');
@@ -108,9 +109,26 @@ function readScripts(folder) {
       const header = parseUserScriptHeader(filePath);
       const urlPath = path.join('scripts', folder, relativePath).replace(/\\/g, '/');
       const url = `https://github.com/rowkav09/CCO-scripts-archive/blob/main/${urlPath}`;
+      const brokenUrl = buildBrokenIssueUrl({
+        scriptName: header.name,
+        scriptUrl: url,
+        category: folder
+      });
 
-      return `| [${header.name}](${url}) | ${header.description} | ${header.author} | ${header.version} |`;
+      return {
+        row: `| [${header.name}](${url}) | ${header.description} | ${header.author} | ${header.version} |`,
+        brokenUrl
+      };
     });
+}
+
+function buildBrokenIssueUrl({ scriptName, scriptUrl, category }) {
+  const title = encodeURIComponent(`[Broken] ${scriptName}`);
+  const body = encodeURIComponent(
+    `Submit this only if the script is not working.\n\nPlease test it properly before opening the issue.\n\nTag @rowka and I will confirm whether it works or not by reacting with works or doesnt.\n\n**Script:** [${scriptName}](${scriptUrl})\n**Category:** ${category}\n\n**What is broken?**\n`
+  );
+
+  return `https://github.com/rowkav09/CCO-scripts-archive/issues/new?template=${BROKEN_ISSUE_TEMPLATE}&title=${title}&body=${body}`;
 }
 
 function buildCategoryPage(spec) {
@@ -118,13 +136,13 @@ function buildCategoryPage(spec) {
 
   let content = `# ${spec.title}\n\n`;
   content += `**${spec.description}**\n\n`;
-    content += `| Script Name | Description | Author | Latest Version | Rating |\n`;
-    content += `|-------------|-------------|--------|----------------|--------|\n`;
+  content += `| Script Name | Description | Author | Latest Version | Rating | Report Broken |\n`;
+  content += `|-------------|-------------|--------|----------------|--------|--------------|\n`;
 
   if (rows.length === 0) {
-     content += `| _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ |\n`;
+     content += `| _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ |\n`;
   } else {
-    content += `${rows.map(row => `${row.replace(/\s*\|\s*$/, '')} | — |`).join('\n')}\n`;
+    content += `${rows.map(({ row, brokenUrl }) => `${row} — | [Report Broken](${brokenUrl}) |`).join('\n')}\n`;
   }
 
   return { content, scriptCount: rows.length };

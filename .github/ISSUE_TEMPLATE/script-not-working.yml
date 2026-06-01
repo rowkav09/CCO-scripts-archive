@@ -1,0 +1,29 @@
+name: Script Not Working
+description: Submit this only if a script is not working
+title: "[Broken] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Submit only if the script is not working
+        Please test properly before opening this issue.
+
+        By default, scripts are assumed to be working.
+
+        Tag @rowka and I will confirm whether it works or not by reacting with works or doesnt.
+  - type: input
+    id: script
+    attributes:
+      label: Script
+      description: Which script is broken?
+      placeholder: script-name.js
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is broken?
+      description: Describe what failed and how to reproduce it.
+      placeholder: It does not...
+    validations:
+      required: true

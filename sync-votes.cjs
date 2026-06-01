@@ -6,6 +6,15 @@ const WIKI_DIR = path.join(__dirname, 'wiki');
 const TOKEN = process.env.GITHUB_TOKEN;
 const CATEGORY_ORDER = ['auto-farm', 'bots', 'enhancements', 'gaming', 'ui', 'utilities'];
 
+function buildBrokenIssueUrl({ scriptName, scriptUrl, category }) {
+  const title = encodeURIComponent(`[Broken] ${scriptName}`);
+  const body = encodeURIComponent(
+    `Submit this only if the script is not working.\n\nPlease test it properly before opening the issue.\n\nTag @rowka and I will confirm whether it works or not by reacting with works or doesnt.\n\n**Script:** [${scriptName}](${scriptUrl})\n**Category:** ${category}\n\n**What is broken?**\n`
+  );
+
+  return `https://github.com/rowkav09/CCO-scripts-archive/issues/new?template=script-not-working.yml&title=${title}&body=${body}`;
+}
+
 function githubHeaders(useAuth = true) {
   const headers = {
     Accept: 'application/vnd.github+json',
@@ -100,9 +109,21 @@ async function main() {
 
       updated = updated.replace(rowRegex, (row) => {
         const cells = row.split('|');
-        if (cells.length < 7) return row;
+        if (cells.length < 8) return row;
         const display = (count > 0) ? `${avg.toFixed(1)} / 10 (${count})` : '—';
-        cells[cells.length - 2] = ` [${display}](${url}) `;
+        const scriptCell = cells[1].trim();
+        const scriptMatch = scriptCell.match(/^\[([^\]]+)\]\((https:\/\/github\.com\/[^)]+)\)$/);
+        const scriptLabel = scriptMatch ? scriptMatch[1] : scriptName;
+        const scriptUrl = scriptMatch ? scriptMatch[2] : url;
+        const categoryName = scriptUrl.includes('/scripts/auto-farm/') ? 'auto-farm'
+          : scriptUrl.includes('/scripts/bots/') ? 'bots'
+          : scriptUrl.includes('/scripts/enhancements/') ? 'enhancements'
+          : scriptUrl.includes('/scripts/gaming/') ? 'gaming'
+          : scriptUrl.includes('/scripts/ui/') ? 'ui'
+          : 'utilities';
+        const brokenUrl = buildBrokenIssueUrl({ scriptName: scriptLabel, scriptUrl, category: categoryName });
+        cells[cells.length - 3] = ` [${display}](${url}) `;
+        cells[cells.length - 2] = ` [Report Broken](${brokenUrl}) `;
         return cells.join('|');
       });
     }
@@ -138,12 +159,13 @@ async function main() {
     return a.scriptName.localeCompare(b.scriptName);
   });
 
-  const rows = ['| Rank | Script | Issue | Category | Rating | Votes |', '|------|--------|-------|----------|--------:|------:|'];
+  const rows = ['| Rank | Script | Issue | Category | Rating | Votes | Report Broken |', '|------|--------|-------|----------|--------:|------:|---------------|'];
   ranked.forEach((entry, index) => {
     const ratingText = entry.count > 0 ? `${entry.avg.toFixed(1)} / 10` : '—';
     const votesText = entry.count > 0 ? String(entry.count) : '0';
     const issueText = entry.issueUrl ? `[Vote Issue](${entry.issueUrl})` : '—';
-    rows.push(`| ${index + 1} | [${entry.scriptName}](${entry.url}) | ${issueText} | ${entry.category} | ${ratingText} | ${votesText} |`);
+    const brokenUrl = buildBrokenIssueUrl({ scriptName: entry.scriptName, scriptUrl: entry.url, category: entry.category });
+    rows.push(`| ${index + 1} | [${entry.scriptName}](${entry.url}) | ${issueText} | ${entry.category} | ${ratingText} | ${votesText} | [Report Broken](${brokenUrl}) |`);
   });
 
   const leaderboardContent = `# Leaderboard\n\nAll scripts in the repository ranked by user votes. Scripts without votes are listed at the bottom until they receive ratings.\n\n${rows.join('\n')}\n\n*Generated from script vote issues*`;
