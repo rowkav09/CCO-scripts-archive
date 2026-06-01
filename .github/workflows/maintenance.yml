@@ -103,12 +103,17 @@ jobs:
 
       - name: Sync to GitHub Wiki
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WIKI_TOKEN: ${{ secrets.WIKI_TOKEN }}
         run: |
           set -euo pipefail
 
+          if [ -z "${WIKI_TOKEN}" ]; then
+            echo "Missing WIKI_TOKEN secret"
+            exit 1
+          fi
+
           rm -rf wiki-sync
-          git clone --depth 1 --branch master "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.wiki.git" wiki-sync
+          git clone --depth 1 --branch master "https://x-access-token:${WIKI_TOKEN}@github.com/${{ github.repository }}.wiki.git" wiki-sync
           rsync -a --delete wiki/ wiki-sync/
 
           cd wiki-sync
