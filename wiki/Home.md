@@ -7,7 +7,7 @@
 See the full repository ranking, including scripts with no votes, on the [[Leaderboard]] page.
 
 **Last Updated:** Auto-updated on each change  
-**Total Scripts:** 30
+**Total Scripts:** 32
 
 ### Categories
 
@@ -18,7 +18,7 @@ See the full repository ranking, including scripts with no votes, on the [[Leade
 | **UI** | Themes, overlays, interface redesigns, wallpapers, custom displays, and visual improvements for the client. | 6 | [[UI]] |
 | **Enhancements** | Extra features and upgrades that improve the overall experience without fully fitting into other categories. | 5 | [[Enhancements]] |
 | **Bots** | Scripts or systems that interact with external services, automated trading, deposits/withdrawals, or server-connected features. | 2 | [[Bots]] |
-| **Utilities** | Helpful tools for pricing, tracking, chat features, float checking, inventory management, and general quality-of-life improvements. | 5 | [[Utilities]] |
+| **Utilities** | Helpful tools for pricing, tracking, chat features, float checking, inventory management, and general quality-of-life improvements. | 7 | [[Utilities]] |
 
 ---
 
