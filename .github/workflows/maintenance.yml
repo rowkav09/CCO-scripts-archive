@@ -126,6 +126,6 @@ jobs:
             echo "No wiki changes to commit"
           else
             git commit -m "chore: sync generated wiki pages"
-            git push origin HEAD:master
+            git push --force origin HEAD:master
             echo "GitHub Wiki updated"
           fi
