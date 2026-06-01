@@ -4,7 +4,7 @@
 
 [![Last Updated](https://img.shields.io/github/last-commit/rowkav09/CCO-scripts-archive)](https://github.com/rowkav09/CCO-scripts-archive)
 [![Stars](https://img.shields.io/github/stars/rowkav09/CCO-scripts-archive)](https://github.com/rowkav09/CCO-scripts-archive/stargazers)
-
+[![CodeFactor](https://www.codefactor.io/repository/github/rowkav09/cco-scripts-archive/badge)](https://www.codefactor.io/repository/github/rowkav09/cco-scripts-archive)
 ---
 
 ### Quick Start
