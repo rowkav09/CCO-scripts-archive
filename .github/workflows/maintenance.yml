@@ -114,7 +114,7 @@ jobs:
 
           wiki_sync_dir="$(mktemp -d)"
           git clone --depth 1 --branch master "https://x-access-token:${WIKI_TOKEN}@github.com/${{ github.repository }}.wiki.git" "$wiki_sync_dir"
-          rsync -a --delete wiki/ "$wiki_sync_dir"/
+          rsync -a --delete --exclude='.git' wiki/ "$wiki_sync_dir"/
 
           git -C "$wiki_sync_dir" config user.name "github-actions[bot]"
           git -C "$wiki_sync_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
