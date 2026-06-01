@@ -112,20 +112,19 @@ jobs:
             exit 1
           fi
 
-          rm -rf wiki-sync
-          git clone --depth 1 --branch master "https://x-access-token:${WIKI_TOKEN}@github.com/${{ github.repository }}.wiki.git" wiki-sync
-          rsync -a --delete wiki/ wiki-sync/
+          wiki_sync_dir="$(mktemp -d)"
+          git clone --depth 1 --branch master "https://x-access-token:${WIKI_TOKEN}@github.com/${{ github.repository }}.wiki.git" "$wiki_sync_dir"
+          rsync -a --delete wiki/ "$wiki_sync_dir"/
 
-          cd wiki-sync
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$wiki_sync_dir" config user.name "github-actions[bot]"
+          git -C "$wiki_sync_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add -A
+          git -C "$wiki_sync_dir" add -A
 
-          if git diff --staged --quiet; then
+          if git -C "$wiki_sync_dir" diff --staged --quiet; then
             echo "No wiki changes to commit"
           else
-            git commit -m "chore: sync generated wiki pages"
-            git push --force origin HEAD:master
+            git -C "$wiki_sync_dir" commit -m "chore: sync generated wiki pages"
+            git -C "$wiki_sync_dir" push --force-with-lease origin HEAD:master
             echo "GitHub Wiki updated"
           fi
