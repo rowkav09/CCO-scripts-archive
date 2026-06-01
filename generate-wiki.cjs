@@ -133,9 +133,11 @@ function buildBrokenIssueUrl({ scriptName, scriptUrl, category }) {
 
 function buildCategoryPage(spec) {
   const rows = readScripts(spec.folder);
+  const scriptCount = rows.length;
 
   let content = `# ${spec.title}\n\n`;
   content += `**${spec.description}**\n\n`;
+  content += `**Total Scripts:** ${scriptCount}\n\n`;
   content += `| Script Name | Description | Author | Latest Version | Rating | Report Broken |\n`;
   content += `|-------------|-------------|--------|----------------|--------|--------------|\n`;
 
@@ -145,7 +147,7 @@ function buildCategoryPage(spec) {
     content += `${rows.map(({ row, brokenUrl }) => `${row} — | [Report Broken](${brokenUrl}) |`).join('\n')}\n`;
   }
 
-  return { content, scriptCount: rows.length };
+  return { content, scriptCount };
 }
 
 function cleanStaleWikiPages() {
@@ -175,7 +177,7 @@ function main() {
     fs.writeFileSync(path.join(WIKI_DIR, spec.page), content);
 
     totalScripts += scriptCount;
-    pageRows.push(`| **${spec.title}** | ${spec.description} | ${scriptCount} | [[${spec.browseLabel}]] |`);
+    pageRows.push(`| **${spec.title}** | ${spec.description} | [[${spec.browseLabel}]] |`);
     console.log(`✅ ${spec.page} updated`);
   }
 
@@ -186,8 +188,8 @@ function main() {
   homeContent += `**Last Updated:** Auto-updated on each change  \n`;
   homeContent += `**Total Scripts:** ${totalScripts}\n\n`;
   homeContent += `### Categories\n\n`;
-  homeContent += `| Category | Description | Scripts | Browse |\n`;
-  homeContent += `|----------|-------------|---------|--------|\n`;
+  homeContent += `| Category | Description | Browse |\n`;
+  homeContent += `|----------|-------------|--------|\n`;
   homeContent += `${pageRows.join('\n')}\n`;
   homeContent += `\n---\n\n**Made with ❤️ for the Case Clicker community**`;
 

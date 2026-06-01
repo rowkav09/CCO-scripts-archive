@@ -60,10 +60,9 @@ function updateCategoriesSection(homeContent) {
       ['Utilities', 'Helpful tools for pricing, tracking, chat features, float checking, inventory management, and general quality-of-life improvements.', 'utilities', 'Utilities']
     ];
 
-    let table = '\n| Category | Description | Scripts | Browse |\n|----------|-------------|---------|--------|\n';
+    let table = '\n| Category | Description | Browse |\n|----------|-------------|--------|\n';
     for (const [label, desc, folder, wikiPage] of rows) {
-      const count = countScripts(folder);
-      table += `| **${label}** | ${desc} | ${count} | [[${wikiPage}]] |\n`;
+      table += `| **${label}** | ${desc} | [[${wikiPage}]] |\n`;
     }
 
     return before + table + after;
@@ -87,10 +86,9 @@ function updateCategoriesSection(homeContent) {
         ['Utilities', 'Helpful tools for pricing, tracking, chat features, float checking, inventory management, and general quality-of-life improvements.', 'utilities', 'Utilities']
       ];
 
-      let table = '### Categories\n\n| Category | Description | Scripts | Browse |\n|----------|-------------|---------|--------|\n';
+      let table = '### Categories\n\n| Category | Description | Browse |\n|----------|-------------|--------|\n';
       for (const [label, desc, folder, wikiPage] of rows) {
-        const count = countScripts(folder);
-        table += `| **${label}** | ${desc} | ${count} | [[${wikiPage}]] |\n`;
+        table += `| **${label}** | ${desc} | [[${wikiPage}]] |\n`;
       }
 
       return before + table + after;
