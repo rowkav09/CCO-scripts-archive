@@ -3,7 +3,8 @@
 // @namespace    http://tampermonkey.net/
 // @version      17.0
 // @description  Auto skillmaps
-// @author       Jamie, Huge credit to ChunkyCheese
+// @author       Jamie
+// @credits      Huge credit to ChunkyCheese
 // @match        https://case-clicker.com/*
 // @grant        GM_addStyle
 // ==/UserScript==
