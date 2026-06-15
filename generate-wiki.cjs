@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseUserScriptHeader } = require('./parse-header.cjs');
+const { REPO, buildBrokenIssueUrl } = require('./utils.cjs');
 
 const SCRIPTS_DIR = path.join(__dirname, 'scripts');
 const WIKI_DIR = path.join(__dirname, 'wiki');
@@ -52,7 +53,6 @@ const CATEGORY_SPECS = [
 
 const CATEGORY_BY_FOLDER = new Map(CATEGORY_SPECS.map(spec => [spec.folder, spec]));
 const WIKI_FILES = new Set(['Home.md', 'Leaderboard.md', ...CATEGORY_SPECS.map(spec => spec.page)]);
-const BROKEN_ISSUE_TEMPLATE = 'script-not-working.yml';
 
 function isScriptFile(file) {
   return (file.endsWith('.js') || file.endsWith('.user.js')) && file !== 'index.js' && !file.startsWith('.');
@@ -108,7 +108,7 @@ function readScripts(folder) {
     .map(({ filePath, relativePath }) => {
       const header = parseUserScriptHeader(filePath);
       const urlPath = path.join('scripts', folder, relativePath).replace(/\\/g, '/');
-      const url = `https://github.com/rowkav09/CCO-scripts-archive/blob/main/${urlPath}`;
+      const url = `https://github.com/${REPO}/blob/main/${urlPath}`;
       const brokenUrl = buildBrokenIssueUrl({
         scriptName: header.name,
         scriptUrl: url,
@@ -122,14 +122,6 @@ function readScripts(folder) {
     });
 }
 
-function buildBrokenIssueUrl({ scriptName, scriptUrl, category }) {
-  const title = encodeURIComponent(`[Broken] ${scriptName}`);
-  const body = encodeURIComponent(
-    `Submit this only if the script is not working.\n\nPlease test it properly before opening the issue.\n\nTag @rowka and I will confirm whether it works or not by reacting with works or doesnt.\n\n**Script:** [${scriptName}](${scriptUrl})\n**Category:** ${category}\n\n**What is broken?**\n`
-  );
-
-  return `https://github.com/rowkav09/CCO-scripts-archive/issues/new?template=${BROKEN_ISSUE_TEMPLATE}&title=${title}&body=${body}`;
-}
 
 function buildCategoryPage(spec) {
   const rows = readScripts(spec.folder);

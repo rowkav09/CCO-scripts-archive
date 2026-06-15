@@ -10,18 +10,12 @@ const LEADERBOARD_START = '<!-- LEADERBOARD_START -->';
 const LEADERBOARD_END = '<!-- LEADERBOARD_END -->';
 
 function getAllScriptFiles(dir) {
-  let results = [];
-  const list = fs.readdirSync(dir);
-  list.forEach(file => {
-    const filePath = path.join(dir, file);
-    const stat = fs.statSync(filePath);
-    if (stat && stat.isDirectory()) {
-      results = results.concat(getAllScriptFiles(filePath));
-    } else {
-      results.push(filePath);
-    }
-  });
-  return results;
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .flatMap(entry => {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) return getAllScriptFiles(entryPath);
+      return entry.name.endsWith('.js') && !entry.name.startsWith('.') ? [entryPath] : [];
+    });
 }
 
 function extractAuthors(filePath) {
@@ -40,9 +34,10 @@ function buildLeaderboard(authorsCount) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5);
   let md = '| Rank | Author | Scripts |\n|---|---|---|\n';
-  sorted.forEach(([author, count], i) => {
+  for (let i = 0; i < sorted.length; i++) {
+    const [author, count] = sorted[i];
     md += `| ${i + 1} | ${author} | ${count} |\n`;
-  });
+  }
   return md;
 }
 
@@ -64,12 +59,11 @@ function updateReadme(leaderboardMd) {
 function main() {
   const files = getAllScriptFiles(SCRIPTS_DIR);
   const authorsCount = {};
-  files.forEach(file => {
-    const authors = extractAuthors(file);
-    authors.forEach(author => {
+  for (const file of files) {
+    for (const author of extractAuthors(file)) {
       authorsCount[author] = (authorsCount[author] || 0) + 1;
-    });
-  });
+    }
+  }
   const leaderboardMd = buildLeaderboard(authorsCount);
   updateReadme(leaderboardMd);
   console.log('Leaderboard updated in README.md');

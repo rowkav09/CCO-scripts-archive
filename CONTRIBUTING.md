@@ -14,7 +14,7 @@ Thank you for wanting to contribute!
     - `scripts/enhancements/`
     - `scripts/bots/`
     - `scripts/utilities/`
-3. Name your file descriptively, e.g. `ultra-clicker.user.js`
+3. Name your file descriptively, e.g. `ultra-clicker.js`
 4. Add the proper UserScript header (see template below)
 5. Test your script on https://case-clicker.com/
 6. Submit a **Pull Request**
@@ -42,7 +42,6 @@ Thank you for wanting to contribute!
 // @author       YourGitHubUsername
 // @match        https://case-clicker.com/*
 // @grant        none
-// @require      https://raw.githubusercontent.com/rowkav09/CCO-scripts-archive/main/libs/utils.js (if needed)
 // ==/UserScript==
 
 (function() {

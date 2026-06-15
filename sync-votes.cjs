@@ -1,36 +1,23 @@
 const fs = require('fs');
 const path = require('path');
+const { REPO, buildBrokenIssueUrl } = require('./utils.cjs');
 
-const REPO = 'rowkav09/CCO-scripts-archive';
 const WIKI_DIR = path.join(__dirname, 'wiki');
 const TOKEN = process.env.GITHUB_TOKEN;
 const CATEGORY_ORDER = ['auto-farm', 'bots', 'enhancements', 'gaming', 'ui', 'utilities'];
 
-function buildBrokenIssueUrl({ scriptName, scriptUrl, category }) {
-  const title = encodeURIComponent(`[Broken] ${scriptName}`);
-  const body = encodeURIComponent(
-    `Submit this only if the script is not working.\n\nPlease test it properly before opening the issue.\n\nTag @rowka and I will confirm whether it works or not by reacting with works or doesnt.\n\n**Script:** [${scriptName}](${scriptUrl})\n**Category:** ${category}\n\n**What is broken?**\n`
-  );
-
-  return `https://github.com/rowkav09/CCO-scripts-archive/issues/new?template=script-not-working.yml&title=${title}&body=${body}`;
-}
-
-function githubHeaders(useAuth = true) {
+function githubHeaders() {
   const headers = {
     Accept: 'application/vnd.github+json',
     'User-Agent': 'CCO-scripts-archive-sync-votes'
   };
-  if (useAuth && TOKEN) headers.Authorization = `Bearer ${TOKEN}`;
+  if (TOKEN) headers.Authorization = `Bearer ${TOKEN}`;
   return headers;
 }
 
-async function requestJson(url, { auth = true } = {}) {
-  const res = await fetch(url, { headers: githubHeaders(auth) });
+async function requestJson(url) {
+  const res = await fetch(url, { headers: githubHeaders() });
   const data = await res.json();
-
-  if (res.status === 401 && auth && TOKEN) {
-    return requestJson(url, { auth: false });
-  }
 
   if (!res.ok) {
     throw new Error(`Request failed (${res.status}): ${data.message || 'unknown error'}`);
@@ -109,7 +96,10 @@ async function main() {
 
       updated = updated.replace(rowRegex, (row) => {
         const cells = row.split('|');
-        if (cells.length < 8) return row;
+        if (cells.length < 8) {
+          console.warn(`Skipping vote injection for "${scriptName}" in ${file} — unexpected column count (${cells.length}). Table structure may have changed.`);
+          return row;
+        }
         const display = (count > 0) ? `${avg.toFixed(1)} / 10 (${count})` : '—';
         const scriptCell = cells[1].trim();
         const scriptMatch = scriptCell.match(/^\[([^\]]+)\]\((https:\/\/github\.com\/[^)]+)\)$/);
@@ -175,20 +165,6 @@ async function main() {
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function findScriptUrl(scriptName) {
-  const scriptsRoot = path.join(__dirname, 'scripts');
-  if (!fs.existsSync(scriptsRoot)) return null;
-  const folders = fs.readdirSync(scriptsRoot);
-  for (const f of folders) {
-    const candidate = path.join(scriptsRoot, f, scriptName);
-    if (fs.existsSync(candidate)) {
-      const rel = path.join('scripts', f, scriptName).replace(/\\/g, '/');
-      return `https://github.com/rowkav09/CCO-scripts-archive/blob/main/${rel}`;
-    }
-  }
-  return null;
 }
 
 function listAllScripts() {

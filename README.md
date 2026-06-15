@@ -7,13 +7,6 @@
 [![CodeFactor](https://www.codefactor.io/repository/github/rowkav09/cco-scripts-archive/badge)](https://www.codefactor.io/repository/github/rowkav09/cco-scripts-archive)
 ---
 
-### Quick Start
-
-1. Install **Tampermonkey** or **Violentmonkey**
-2. Click **Raw** on any `.js` file in `scripts` and copy into tampermonkey to install
-
----
-
 ### Script Categories
 
 | Category           | Description                                      | Folder |
