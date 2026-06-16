@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      4.0
 // @description  Discord notifications for favorited skins via API interception. One-time GUI setup.
-// @author       Jamo821
+// @author       Jamo
 // @match        https://case-clicker.com/*
 // @run-at       document-start
 // @grant        GM_setValue
