@@ -1,0 +1,48 @@
+name: Sync Author Folders
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/**'
+  workflow_dispatch:
+
+concurrency:
+  group: author-folders
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Sync Author Folders
+        run: node sync-author-folders.cjs
+
+      - name: Commit Author Folders
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+          git add -A authors/
+
+          if git diff --staged --quiet; then
+            echo "No changes to author folders"
+          else
+            git commit -m "chore: sync author folders"
+            git push origin HEAD:${{ github.ref_name }}
+            echo "Author folders updated"
+          fi
