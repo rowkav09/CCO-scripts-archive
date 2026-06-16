@@ -82,18 +82,21 @@ jobs:
       - name: Update Leaderboard
         run: node leaderboard-update.cjs
 
+      - name: Sync Author Folders
+        run: node sync-author-folders.cjs
+
       - name: Commit Changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
 
-          git add -A README.md wiki .github/ISSUE_TEMPLATE
+          git add -A README.md wiki .github/ISSUE_TEMPLATE authors/
 
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: update generated wiki files"
+            git commit -m "chore: update generated files"
             git push origin HEAD:${{ github.ref_name }}
             echo "Repository files committed and pushed"
           fi
