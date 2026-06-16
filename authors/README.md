@@ -4,8 +4,7 @@
 
 | Author | Scripts |
 |--------|---------|
-| [Jamie](./Jamie/) | 1 |
-| [Jamo](./Jamo/) | 1 |
+| [Jamie](./Jamie/) | 2 |
 | [ZSB](./ZSB/) | 16 |
 | [Zhiro](./Zhiro/) | 9 |
 | [chunkycheese](./chunkycheese/) | 5 |
