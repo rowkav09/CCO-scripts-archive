@@ -5,7 +5,7 @@
 | Author | Scripts |
 |--------|---------|
 | [Jamie](./Jamie/) | 1 |
-| [Jamo821](./Jamo821/) | 1 |
+| [Jamo](./Jamo/) | 1 |
 | [ZSB](./ZSB/) | 16 |
 | [Zhiro](./Zhiro/) | 9 |
 | [chunkycheese](./chunkycheese/) | 5 |

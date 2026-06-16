@@ -1,4 +1,4 @@
-# Scripts by Jamo821
+# Scripts by Jamo
 
 > This folder is auto-generated. Edit scripts in `scripts/` — changes here will be overwritten.
 
