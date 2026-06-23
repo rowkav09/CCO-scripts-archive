@@ -34,10 +34,19 @@
 
 ### How to Install
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/)
-2. Go to any `.user.js` file
-3. Click the **Raw** button
-4. Tampermonkey will prompt to install
+All scripts support one-click install via [Tampermonkey](https://www.tampermonkey.net/), a free browser extension available for Chrome, Firefox, Edge, and Safari.
+
+**Quick install (recommended)**
+1. Install [Tampermonkey](https://www.tampermonkey.net/) if you haven't already
+2. Open the **[Wiki](https://github.com/rowkav09/CCO-scripts-archive/wiki)** and find the script you want
+3. Click the **Install** link next to it — Tampermonkey will open an install prompt automatically
+
+**Manual install**
+1. Browse to the script file in the `scripts/` folder
+2. Click the **Raw** button in the top-right of the file view
+3. Tampermonkey will intercept the page and prompt you to install
+
+> Scripts are `.user.js` files. If Tampermonkey doesn't prompt, make sure the extension is enabled and you're clicking a raw file URL.
 
 ---
 
