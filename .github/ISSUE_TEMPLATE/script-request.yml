@@ -1,0 +1,49 @@
+name: Script Request
+description: Suggest a new script for the archive
+title: "[Request] "
+labels: ["request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Script Request
+        Use this to suggest a new script you'd like to see added to the archive.
+        Be as specific as possible — the more detail you give, the easier it is for a contributor to pick it up.
+  - type: input
+    id: name
+    attributes:
+      label: Script Name
+      description: What would you call this script?
+      placeholder: e.g. Auto Case Opener
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: Which category does this fit best?
+      options:
+        - Auto-Farm
+        - Gaming
+        - UI
+        - Enhancements
+        - Bots
+        - Utilities
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What should it do?
+      description: Describe the behaviour you want — what it automates, changes, or adds.
+      placeholder: It should automatically...
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Any similar scripts that already exist, pages it should run on, edge cases, or anything else useful.
+      placeholder: Similar to X but...
+    validations:
+      required: false
