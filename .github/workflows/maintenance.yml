@@ -37,6 +37,36 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Rename .js scripts to .user.js
+        run: |
+          find scripts -type f -name "*.js" ! -name "*.user.js" | while read -r f; do
+            newf="${f%.js}.user.js"
+            git mv "$f" "$newf"
+            echo "Renamed: $f → $newf"
+          done
+
+      - name: Migrate Vote Issue Titles (.js → .user.js)
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Checking for vote issues with old .js titles..."
+
+          old_issues=$(gh issue list --state open --label vote --limit 1000 \
+            --json number,title \
+            --jq '.[] | select(.title | test("\\[Vote\\] [^\\n]+\\.js$") and (test("\\[Vote\\] [^\\n]+\\.user\\.js$") | not)) | "\(.number)|\(.title)"' \
+            || echo "")
+
+          if [ -z "$old_issues" ]; then
+            echo "No vote issue titles need migrating"
+          else
+            while IFS='|' read -r number title; do
+              new_title="${title%.js}.user.js"
+              echo "Migrating issue #$number: '$title' → '$new_title'"
+              gh issue edit "$number" --title "$new_title" --repo "${{ github.repository }}"
+            done <<< "$old_issues"
+          fi
+
       - name: Generate Wiki Pages
         run: node generate-wiki.cjs
 
@@ -45,9 +75,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Scanning for .js scripts..."
+          echo "Scanning for .user.js scripts..."
 
-          mapfile -t script_files < <(find scripts -type f -name "*.js" | sort)
+          mapfile -t script_files < <(find scripts -type f -name "*.user.js" | sort)
 
           echo "Found ${#script_files[@]} script files"
 
@@ -91,7 +121,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
 
-          git add -A README.md wiki .github/ISSUE_TEMPLATE authors/
+          git add -A README.md wiki .github/ISSUE_TEMPLATE authors/ scripts/
 
           if git diff --staged --quiet; then
             echo "No changes to commit"
