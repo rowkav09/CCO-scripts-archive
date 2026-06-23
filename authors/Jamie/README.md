@@ -4,5 +4,5 @@
 
 | Script | Category |
 |--------|----------|
-| [`auto-skillmap.js`](../../scripts/Utilities/auto-skillmap.js) | Utilities |
-| [`discord-favourites-notifier.js`](../../scripts/enhancements/discord-favourites-notifier.js) | enhancements |
+| [`auto-skillmap.user.js`](../../scripts/Utilities/auto-skillmap.user.js) | Utilities |
+| [`discord-favourites-notifier.user.js`](../../scripts/enhancements/discord-favourites-notifier.user.js) | enhancements |

@@ -4,8 +4,8 @@
 
 | Script | Category |
 |--------|----------|
-| [`auto-submit.js`](../../scripts/Auto-farm/auto-submit.js) | Auto-farm |
-| [`auto-tradeup.js`](../../scripts/Auto-farm/auto-tradeup.js) | Auto-farm |
-| [`effects-scripts.js`](../../scripts/enhancements/effects-scripts.js) | enhancements |
-| [`event-border-colour-changer.js`](../../scripts/ui/event-border-colour-changer.js) | ui |
-| [`sticker-replacer.js`](../../scripts/ui/sticker-replacer.js) | ui |
+| [`auto-submit.user.js`](../../scripts/Auto-farm/auto-submit.user.js) | Auto-farm |
+| [`auto-tradeup.user.js`](../../scripts/Auto-farm/auto-tradeup.user.js) | Auto-farm |
+| [`effects-scripts.user.js`](../../scripts/enhancements/effects-scripts.user.js) | enhancements |
+| [`event-border-colour-changer.user.js`](../../scripts/ui/event-border-colour-changer.user.js) | ui |
+| [`sticker-replacer.user.js`](../../scripts/ui/sticker-replacer.user.js) | ui |

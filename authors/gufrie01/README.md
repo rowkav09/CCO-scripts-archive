@@ -4,6 +4,6 @@
 
 | Script | Category |
 |--------|----------|
-| [`case-autosell.js`](../../scripts/Auto-farm/case-autosell.js) | Auto-farm |
-| [`auto-forge.js`](../../scripts/Utilities/auto-forge.js) | Utilities |
-| [`terminal-auto-opener.js`](../../scripts/Utilities/terminal-auto-opener.js) | Utilities |
+| [`case-autosell.user.js`](../../scripts/Auto-farm/case-autosell.user.js) | Auto-farm |
+| [`auto-forge.user.js`](../../scripts/Utilities/auto-forge.user.js) | Utilities |
+| [`terminal-auto-opener.user.js`](../../scripts/Utilities/terminal-auto-opener.user.js) | Utilities |

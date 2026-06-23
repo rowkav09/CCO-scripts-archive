@@ -4,12 +4,12 @@
 
 | Script | Category |
 |--------|----------|
-| [`api-case-open.js`](../../scripts/Auto-farm/api-case-open.js) | Auto-farm |
-| [`api-clicker.js`](../../scripts/Auto-farm/api-clicker.js) | Auto-farm |
-| [`trade-tokens-adder.js`](../../scripts/Utilities/trade-tokens-adder.js) | Utilities |
-| [`auto-trader.js`](../../scripts/bots/auto-trader.js) | bots |
-| [`chat-pricebot.js`](../../scripts/bots/chat-pricebot.js) | bots |
-| [`favourite-pages.js`](../../scripts/enhancements/favourite-pages.js) | enhancements |
-| [`mute.js`](../../scripts/enhancements/mute.js) | enhancements |
-| [`profile-viewer.js`](../../scripts/enhancements/profile-viewer.js) | enhancements |
-| [`paper-plinko.js`](../../scripts/gaming/paper-plinko.js) | gaming |
+| [`api-case-open.user.js`](../../scripts/Auto-farm/api-case-open.user.js) | Auto-farm |
+| [`api-clicker.user.js`](../../scripts/Auto-farm/api-clicker.user.js) | Auto-farm |
+| [`trade-tokens-adder.user.js`](../../scripts/Utilities/trade-tokens-adder.user.js) | Utilities |
+| [`auto-trader.user.js`](../../scripts/bots/auto-trader.user.js) | bots |
+| [`chat-pricebot.user.js`](../../scripts/bots/chat-pricebot.user.js) | bots |
+| [`favourite-pages.user.js`](../../scripts/enhancements/favourite-pages.user.js) | enhancements |
+| [`mute.user.js`](../../scripts/enhancements/mute.user.js) | enhancements |
+| [`profile-viewer.user.js`](../../scripts/enhancements/profile-viewer.user.js) | enhancements |
+| [`paper-plinko.user.js`](../../scripts/gaming/paper-plinko.user.js) | gaming |
