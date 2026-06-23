@@ -110,7 +110,6 @@ function readScripts(folder) {
       const urlPath = path.join('scripts', category.dirName, relativePath).replace(/\\/g, '/');
       const url = `https://github.com/${REPO}/blob/main/${urlPath}`;
       const rawUrl = `https://raw.githubusercontent.com/${REPO}/main/${urlPath}`;
-      const installBadge = `[![Install with Tampermonkey](https://img.shields.io/badge/Install-Tampermonkey-red?logo=tampermonkey&logoColor=white)](${rawUrl})`;
       const brokenUrl = buildBrokenIssueUrl({
         scriptName: header.name,
         scriptUrl: url,
@@ -118,7 +117,7 @@ function readScripts(folder) {
       });
 
       return {
-        row: `| [${header.name}](${url}) | ${header.description} | ${header.author} | ${header.version} | ${installBadge} |`,
+        row: `| [${header.name}](${url}) | ${header.description} | ${header.author} | ${header.version} | [Install](${rawUrl}) |`,
         brokenUrl
       };
     });
