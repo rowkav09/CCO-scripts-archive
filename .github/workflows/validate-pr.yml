@@ -1,0 +1,71 @@
+name: Validate PR Scripts
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'scripts/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install ESLint
+        run: npm install --no-save eslint@8
+
+      - name: Get changed script files
+        id: changed
+        run: |
+          files=$(git diff --name-only --diff-filter=AM \
+            "origin/${{ github.base_ref }}" HEAD \
+            | grep -E 'scripts/.+\.user\.js$' || true)
+          echo "Changed script files:"
+          echo "${files:-(none)}"
+          {
+            echo 'files<<EOF'
+            echo "$files"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Validate headers and lint
+        id: validate
+        if: steps.changed.outputs.files != ''
+        env:
+          CHANGED_FILES: ${{ steps.changed.outputs.files }}
+        run: node .github/scripts/validate-scripts.cjs > /tmp/report.md
+        continue-on-error: true
+
+      - name: Post result comment
+        if: steps.changed.outputs.files != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('/tmp/report.md', 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
+
+      - name: Fail if validation errors found
+        if: steps.validate.outcome == 'failure'
+        run: |
+          echo "One or more scripts failed validation. See PR comment for details."
+          exit 1
