@@ -127,7 +127,7 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "chore: update generated files"
-            git pull --rebase origin ${{ github.ref_name }}
+            git pull --rebase -X ours origin ${{ github.ref_name }}
             git push origin HEAD:${{ github.ref_name }}
             echo "Repository files committed and pushed"
           fi
