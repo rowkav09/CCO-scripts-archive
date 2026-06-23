@@ -1,0 +1,27 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "greasemonkey": true
+  },
+  "extends": "eslint:recommended",
+  "parserOptions": {
+    "ecmaVersion": 2021
+  },
+  "globals": {
+    "GM_addStyle": "readonly",
+    "GM_xmlhttpRequest": "readonly",
+    "GM_setValue": "readonly",
+    "GM_getValue": "readonly",
+    "GM_deleteValue": "readonly",
+    "GM_getResourceText": "readonly",
+    "GM_notification": "readonly",
+    "GM_openInTab": "readonly",
+    "unsafeWindow": "readonly"
+  },
+  "rules": {
+    "no-unused-vars": "warn",
+    "no-undef": "error",
+    "no-unreachable": "error"
+  }
+}
