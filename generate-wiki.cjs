@@ -107,8 +107,10 @@ function readScripts(folder) {
     .sort((left, right) => left.relativePath.localeCompare(right.relativePath))
     .map(({ filePath, relativePath }) => {
       const header = parseUserScriptHeader(filePath);
-      const urlPath = path.join('scripts', folder, relativePath).replace(/\\/g, '/');
+      const urlPath = path.join('scripts', category.dirName, relativePath).replace(/\\/g, '/');
       const url = `https://github.com/${REPO}/blob/main/${urlPath}`;
+      const rawUrl = `https://raw.githubusercontent.com/${REPO}/main/${urlPath}`;
+      const installBadge = `[![Install with Tampermonkey](https://img.shields.io/badge/Install-Tampermonkey-red?logo=tampermonkey&logoColor=white)](${rawUrl})`;
       const brokenUrl = buildBrokenIssueUrl({
         scriptName: header.name,
         scriptUrl: url,
@@ -116,7 +118,7 @@ function readScripts(folder) {
       });
 
       return {
-        row: `| [${header.name}](${url}) | ${header.description} | ${header.author} | ${header.version} |`,
+        row: `| [${header.name}](${url}) | ${header.description} | ${header.author} | ${header.version} | ${installBadge} |`,
         brokenUrl
       };
     });
@@ -130,11 +132,11 @@ function buildCategoryPage(spec) {
   let content = `# ${spec.title}\n\n`;
   content += `**${spec.description}**\n\n`;
   content += `**Total Scripts:** ${scriptCount}\n\n`;
-  content += `| Script Name | Description | Author | Latest Version | Rating | Report Broken |\n`;
-  content += `|-------------|-------------|--------|----------------|--------|--------------|\n`;
+  content += `| Script Name | Description | Author | Latest Version | Install | Rating | Report Broken |\n`;
+  content += `|-------------|-------------|--------|----------------|---------|--------|---------------|\n`;
 
   if (rows.length === 0) {
-     content += `| _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ |\n`;
+     content += `| _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ | _No scripts found_ |\n`;
   } else {
     content += `${rows.map(({ row, brokenUrl }) => `${row} — | [Report Broken](${brokenUrl}) |`).join('\n')}\n`;
   }
