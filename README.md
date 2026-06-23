@@ -11,12 +11,12 @@
 
 | Category           | Description                                      | Folder |
 |--------------------|--------------------------------------------------|--------|
-| **Auto-Farm**      | Scripts that automate repetitive actions and grind loops | [`scripts/auto-farm`](scripts/auto-farm) |
+| **Auto-Farm**      | Scripts that automate repetitive actions and grind loops | [`scripts/Auto-farm`](scripts/Auto-farm) |
 | **Gaming**         | Custom game systems, mode improvements, and stats        | [`scripts/gaming`](scripts/gaming) |
 | **UI**             | Themes, overlays, and visual client improvements         | [`scripts/ui`](scripts/ui) |
 | **Enhancements**   | Extra features that do not fit another bucket cleanly    | [`scripts/enhancements`](scripts/enhancements) |
 | **Bots**           | Trading, external-service automation, and server tools   | [`scripts/bots`](scripts/bots) |
-| **Utilities**      | Tracking, chat tools, float tools, and general helpers   | [`scripts/utilities`](scripts/utilities) |
+| **Utilities**      | Tracking, chat tools, float tools, and general helpers   | [`scripts/Utilities`](scripts/Utilities) |
 
 ---
 
