@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      4.7
+// @version      4.8
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -1238,16 +1238,6 @@
     img.src = url;
   }
 
-  // The big yellow-bar number (texts[1] on the podium, tds[3] in the table) is NOT the $
-  // total — confirmed live against the site's own "Premier rating" category, which shows a
-  // completely different number there (the account's XP) than in the small text underneath
-  // (the actual category value). Reusing that slot for our own totalValue (as an earlier
-  // version did) just clobbered it with a mislabeled dollar figure. Since we already capture
-  // Premier rating/rank for every submission, that's the genuinely useful thing to put there.
-  function premierLabel(entry) {
-    return entry.premierRating != null ? Math.round(entry.premierRating).toLocaleString('en-US') : '—';
-  }
-
   // cloneNode(true) copies markup only — none of React's click handlers survive, which is why
   // clicking a user on this cloned leaderboard has never done anything (confirmed live: this
   // is equally true of the site's own native categories right now, not something we broke).
@@ -1276,7 +1266,9 @@
       const avatarImg = stack.querySelector('img.mantine-Avatar-image');
       if (!entry) { texts.forEach(p => { p.textContent = '—'; }); setAvatarSrc(avatarImg, null); return; }
       if (texts[0]) texts[0].textContent = entry.username || 'Unknown';
-      if (texts[1]) texts[1].textContent = premierLabel(entry);
+      // texts[1] (the big yellow-bar number) is left untouched — it's the account's XP, not
+      // a per-category value, and Premier rating didn't belong there either (removed per
+      // explicit instruction — it read as wrong/confusing next to a $ total).
       if (texts[2]) texts[2].textContent = fmtFull(entry.totalValue);
       setAvatarSrc(avatarImg, entry.avatarUrl);
       makeClickable(stack, entry.userId);
@@ -1294,7 +1286,7 @@
         if (nameP) nameP.textContent = entry.username || 'Unknown';
         else tds[1].textContent = entry.username || 'Unknown';
       }
-      if (tds[3]) tds[3].textContent = premierLabel(entry);
+      // tds[3] (the big yellow-bar number) is left untouched — see the podium comment above.
       if (tds[4]) tds[4].textContent = fmtFull(entry.totalValue);
       makeClickable(tr, entry.userId);
       cloneTbody.appendChild(tr);
