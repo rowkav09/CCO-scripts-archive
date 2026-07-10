@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      4.4
+// @version      4.5
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -52,6 +52,10 @@
 
   let priceDataByName = new Map();
   let listByPatternId = new Map();
+  // PatternIds sourced from the Doppler tab specifically ("phases" — Ruby/Sapphire/Black
+  // Pearl/Emerald/Tier 1-3/Diamond Gem/etc.). Excluded from the pattern-level 1/1 bonus below
+  // per explicit instruction — the float-rank-#1 concept doesn't apply the same way to phases.
+  let phasePatternIds = new Set();
   let dataReady = false;
 
   let sortMode = localStorage.getItem('cco_sortMode') === 'pricedata' ? 'pricedata' : 'native';
@@ -193,9 +197,14 @@
       // Base layer: every theme tab, merged. Where the same PatternId shows up in more than
       // one theme tab they've matched exactly in spot checks so far, so last-in wins.
       const newListMap = new Map();
-      for (const text of patternTexts) {
-        for (const row of parsePatternTabToListRows(text)) newListMap.set(row[30], row);
-      }
+      const newPhaseIds = new Set();
+      patternTexts.forEach((text, i) => {
+        const gid = CONFIG.PATTERN_TAB_GIDS[i];
+        for (const row of parsePatternTabToListRows(text)) {
+          newListMap.set(row[30], row);
+          if (gid === 1523542442) newPhaseIds.add(row[30]); // Doppler tab = phases
+        }
+      });
       // "List" is applied last and always wins ties — it's the sheet meant to back this
       // script — but anything it's missing now falls back to the theme-tab data above.
       const listRows = parseCSV(listText);
@@ -207,6 +216,7 @@
 
       priceDataByName = newPriceMap;
       listByPatternId = newListMap;
+      phasePatternIds = newPhaseIds;
       dataReady = true;
       globalSortedCache.clear();
       totalsCache.clear();
@@ -252,14 +262,42 @@
     return base + adj.value; // 'add'
   }
 
+  // "1/1" bonus: a copy that is simultaneously the LOWEST-float AND HIGHEST-float instance
+  // for its pattern/skingroup within an event is effectively one-of-one — no other copy can
+  // hold both extremes at once. Ranks come straight off skin.floatRanks (the game's own
+  // per-item field), read positionally in the exact order the API actually returns them
+  // (verified live): index 6/7 = lowestFloatbyEventSkingroupRank / highestFloatbyEventSkingroupRank
+  // (non-pattern skins), index 18/19 = lowestFloatbyEventPatternRank / highestFloatbyEventPatternRank
+  // (pattern skins). Phases (Doppler-tab patterns) are excluded from the pattern-level bonus
+  // per explicit instruction. "Tier" Skin Group patterns (the generic "Tier 1"-"Tier 5"
+  // buckets, native/QS-priced with no sheet FN/MW value) get a flat $5M instead of the 15x
+  // multiplier since there's no calculated price to multiply in the first place.
+  function getFloatRanks(skin) {
+    return skin.floatRanks ? Object.values(skin.floatRanks) : [];
+  }
+  function apply1of1Bonus(skin, calc, ranks, skinGroupValue) {
+    if (skin.hasPattern) {
+      if (phasePatternIds.has(skin.patternId)) return calc;
+      if (ranks[18] === 1 && ranks[19] === 1) {
+        return skinGroupValue === 'Tier' ? 5000000 : Math.max(5000000, calc * 15);
+      }
+      return calc;
+    }
+    if (ranks[6] === 1 && ranks[7] === 1) return calc + 5000000;
+    return calc;
+  }
+
   function calcPrice(skin) {
     const native = (typeof skin.price === 'number' ? skin.price : skin.weaponPrice) || 0;
     if (!dataReady) return { calc: native, native, source: 'loading' };
 
+    const ranks = getFloatRanks(skin);
     let base = null;
+    let skinGroupValue = '';
 
     if (skin.hasPattern && skin.patternId && listByPatternId.has(skin.patternId)) {
       const row = listByPatternId.get(skin.patternId);
+      skinGroupValue = String(row[3] || '').trim();
       const col = EXT_COL[skin.exterior];
       let extVal = col != null ? parseMagnitude(row[col]) : null;
       if (extVal == null) extVal = parseMagnitude(row[2]);
@@ -297,9 +335,13 @@
 
     // No sheet match: native price already includes any applied stickers. A standalone
     // Katowice sticker item lands here too (no patternId, no PriceData row) — apply the 3x.
+    // "Tier" patterns land here too (their FN/MW cells are literally "QS", so extVal parsing
+    // fails above) — the 1/1 bonus still needs to apply to them, hence the call below rather
+    // than returning straight through un-checked.
     if (base == null) {
       const mult = isKatowiceSticker(skin.name) ? 3 : 1;
-      return { calc: native * mult, native, source: mult > 1 ? 'katowice-3x' : 'fallback-native' };
+      const calc = apply1of1Bonus(skin, native * mult, ranks, skinGroupValue);
+      return { calc, native, source: mult > 1 ? 'katowice-3x' : 'fallback-native' };
     }
 
     const quality = typeof skin.quality === 'number' ? skin.quality : 0;
@@ -311,6 +353,8 @@
     const stickerVal = Array.isArray(skin.stickers)
       ? skin.stickers.reduce((s, st) => s + (typeof st.price === 'number' ? st.price : 0), 0) : 0;
     base += stickerVal;
+
+    base = apply1of1Bonus(skin, base, ranks, skinGroupValue);
 
     return { calc: base, native, source: 'calculated' };
   }
