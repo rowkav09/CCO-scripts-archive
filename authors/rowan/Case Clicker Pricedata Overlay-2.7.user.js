@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      4.0
+// @version      4.1
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
-// @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), and a copy-link button on trade/chat/other-SU cards.
+// @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
 // @match        https://case-clicker.com/*
 // @grant        none
 // @run-at       document-idle
@@ -527,7 +527,25 @@
 
     const grandCalc = inv.calc + suResults.reduce((s, r) => s + r.calc, 0);
     const grandNative = inv.native + suResults.reduce((s, r) => s + r.native, 0);
-    return { inv, sus: suResults, grandCalc, grandNative };
+    onProgress && onProgress('Fetching Premier stats…');
+    const premier = await fetchPremierStats();
+    return { inv, sus: suResults, grandCalc, grandNative, premier };
+  }
+
+  // Premier rank/rating live on /api/me (the game-stats endpoint) alongside money/xp/etc —
+  // fetched fresh on every Scan All so the modal and leaderboard submission both reflect
+  // your current Premier standing, not whatever it was on page load.
+  async function fetchPremierStats() {
+    try {
+      const me = await origFetch('/api/me', { credentials: 'include' }).then(r => r.json());
+      return {
+        premierRating: typeof me.premierRating === 'number' ? me.premierRating : null,
+        premierRankId: me.premierRank && typeof me.premierRank.id === 'number' ? me.premierRank.id : null,
+      };
+    } catch (e) {
+      console.error('[cco-pricedata] failed to fetch Premier stats', e);
+      return { premierRating: null, premierRankId: null };
+    }
   }
 
   function escapeHtml(s) {
@@ -536,8 +554,8 @@
 
   // Persisted (unlike the per-card include toggle) since this is a one-time privacy choice
   // about broadcasting your name/avatar/net worth, not a per-scan ephemeral setting. Defaults
-  // OFF — submitting is opt-in, never silent.
-  function lbSubmitEnabled() { return localStorage.getItem('cco_lbSubmitEnabled') === 'true'; }
+  // ON per explicit request — still an easy per-user opt-out via the modal's toggle.
+  function lbSubmitEnabled() { return localStorage.getItem('cco_lbSubmitEnabled') !== 'false'; }
   function setLbSubmitEnabled(on) { localStorage.setItem('cco_lbSubmitEnabled', on ? 'true' : 'false'); }
 
   function showScanResultsModal(results) {
@@ -572,6 +590,10 @@
       <div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0;opacity:.6;font-size:12px;">
         <span>Grand total (native)</span><span>${fmtFull(results.grandNative)}</span>
       </div>
+      ${results.premier && results.premier.premierRating != null ? `
+      <div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0 0;opacity:.75;font-size:12px;">
+        <span>Premier rating</span><span>${results.premier.premierRating.toLocaleString('en-US')}</span>
+      </div>` : ''}
     `;
 
     // Leaderboard opt-in row. Only shown once you've actually configured an API base — no
@@ -600,7 +622,7 @@
 
       async function doSubmit() {
         status.textContent = 'Submitting…';
-        await submitToLeaderboard(results.grandCalc, results.grandNative);
+        await submitToLeaderboard(results.grandCalc, results.grandNative, results.premier);
         if (lbSubmitEnabled()) status.textContent = 'Submitted ✓';
       }
 
@@ -664,7 +686,7 @@
     return meCache;
   }
 
-  async function submitToLeaderboard(grandCalc, grandNative) {
+  async function submitToLeaderboard(grandCalc, grandNative, premier) {
     if (!CONFIG.LEADERBOARD_API_BASE) return; // feature disabled until a base URL is configured
     try {
       const me = await getMe();
@@ -672,10 +694,12 @@
       if (!userId) return;
       const username = (me && me.name) || 'Unknown';
       const avatarUrl = (me && me.image) || null;
+      const premierRating = premier && typeof premier.premierRating === 'number' ? premier.premierRating : null;
+      const premierRankId = premier && typeof premier.premierRankId === 'number' ? premier.premierRankId : null;
       await origFetch(CONFIG.LEADERBOARD_API_BASE.replace(/\/$/, '') + '/api/submit-score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, username, avatarUrl, totalValue: grandCalc, nativeValue: grandNative }),
+        body: JSON.stringify({ userId, username, avatarUrl, totalValue: grandCalc, nativeValue: grandNative, premierRating, premierRankId }),
       });
     } catch (e) {
       console.error('[cco-pricedata] leaderboard submit failed', e);
@@ -941,6 +965,10 @@
     nativeOptions.forEach(o => {
       if (active) { o.removeAttribute('data-checked'); o.setAttribute('aria-selected', 'false'); }
     });
+    // Same reasoning as the Category dropdown's "Pricedata Value" entry below: it's appended
+    // after every real option, so on reopen it can sit below the fold with no automatic
+    // scroll bringing it into view the way Mantine does for its own options.
+    if (active) custom.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   // Best-effort: while pricedata sort is active, keep the (read-only) input showing
@@ -987,19 +1015,21 @@
   // cases / Vault money collected / Money earned / Money spent / ...) is backed by stats the
   // site's own backend computes — it has no concept of our pricedata valuation. We add a
   // "Pricedata Value" entry to that same Category dropdown (same clone-a-real-option pattern
-  // as the inventory Sort dropdown's "Pricedata" entry) and, when picked, take over the
-  // existing podium (top 3) + table (rest) by mutating their contents in place rather than
-  // hand-building new markup, so it's pixel-identical to every other category. Data comes
-  // from your own Vercel API (see api/submit-score.js + api/leaderboard.js).
+  // as the inventory Sort dropdown's "Pricedata" entry), but — unlike the first version of
+  // this feature — picking it no longer mutates the site's own podium/table DOM in place.
   //
-  // Verified live DOM shape (case-clicker.com/leaderboard):
-  //   - Podium: a .mantine-Group-root containing three .mantine-Stack-root (2nd/1st/3rd
-  //     place, left-to-right). Each Stack has exactly 3 leaf <p class="mantine-Text-root">
-  //     nodes in order: [name, primary bar number, secondary "$..." value].
-  //   - Table: .mantine-Table-table > tbody > tr, one row per rank 4+, each with 5 <td>s:
-  //     [rank "#4", name+avatar Group, (empty spacer), value bar, secondary "$..." value].
+  // That approach (still used nowhere in this file anymore) turned out to be broken in a way
+  // that wasn't obvious until live testing: mutating textContent/img.src on the SITE's own
+  // rendered nodes only changes what's visually displayed — it never touches React's actual
+  // component state/props for those nodes. Any interaction React itself still owns (click
+  // handlers on the podium, or just React re-rendering the list on its own later — e.g. a
+  // websocket update) keeps referencing the ORIGINAL entry that was really there, not our
+  // overlay. In practice that showed up as clicking an entry navigating to whichever real
+  // player used to occupy that spot on the LAST real category you viewed, not the player our
+  // overlay was displaying. A separate, fully own-built modal has no such stale references —
+  // every element in it (including each profile link's href) is built fresh from our own
+  // fetched data every time it opens.
   let leaderboardActive = false;
-  let leaderboardSnapshot = null; // { group, groupHTML, tbody, tbodyHTML, rowTemplate }
 
   function findCategorySelectRoot() {
     const label = [...document.querySelectorAll('label')].find(e => e.textContent.trim() === 'Category');
@@ -1030,9 +1060,9 @@
     if (!nativeOptions.length) return;
     if (!dropdown.dataset.ccoNativeHook) {
       dropdown.dataset.ccoNativeHook = '1';
-      // Picking any real category hands rendering back to the site — just reload so its own
-      // getServerSideProps fetch runs clean instead of us trying to un-mutate our clone.
-      nativeOptions.forEach(o => o.addEventListener('click', () => { if (leaderboardActive) { leaderboardActive = false; location.reload(); } }));
+      // We never touch the site's own leaderboard DOM anymore, so picking a real category
+      // needs nothing more than closing our overlay — no reload required.
+      nativeOptions.forEach(o => o.addEventListener('click', () => { leaderboardActive = false; closeLeaderboardModal(); }));
     }
     let custom = dropdown.querySelector('[data-cco-option]');
     if (!custom) {
@@ -1044,7 +1074,7 @@
       custom.addEventListener('click', (e) => {
         e.stopPropagation();
         leaderboardActive = true;
-        renderCustomLeaderboard();
+        showLeaderboardModal();
       });
       dropdown.appendChild(custom);
     }
@@ -1052,75 +1082,84 @@
     custom.setAttribute('aria-selected', active ? 'true' : 'false');
     if (active) { custom.setAttribute('data-checked', 'true'); custom.setAttribute('data-combobox-active', 'true'); }
     else { custom.removeAttribute('data-checked'); custom.removeAttribute('data-combobox-active'); }
+    // Our option is always appended after every real category, so on a dropdown with this
+    // many entries it sits below the fold. Mantine's own combobox scrolls its actually-active
+    // option into view on open — since it has no idea ours exists, do the same ourselves so
+    // reopening the dropdown while "Pricedata Value" is selected doesn't leave it pinned off
+    // -screen with no indication it's there.
+    if (active) custom.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   function refreshCategoryInputLabel(input) {
     if (leaderboardActive && input.value !== 'Pricedata Value') input.value = 'Pricedata Value';
   }
 
-  function captureLeaderboardDom() {
-    // .mantine-Stack-root and .mantine-Group-root are generic Mantine layout primitives used
-    // all over this page (chat messages, the profile widget, etc. — 60+ of each), so the
-    // podium can only be reliably identified as the one Group whose DIRECT children are
-    // exactly the three podium Stacks (verified live: exactly one such match on this page).
-    const group = [...document.querySelectorAll('.mantine-Group-root')].find(g =>
-      [...g.children].filter(c => c.classList.contains('mantine-Stack-root')).length === 3
-    );
-    const tbody = document.querySelector('.mantine-Table-tbody');
-    if (!group || !tbody || !tbody.firstElementChild) return null;
-    return { group, groupHTML: group.innerHTML, tbody, tbodyHTML: tbody.innerHTML, rowTemplate: tbody.firstElementChild };
+  // ---------- Custom leaderboard modal (fully own-built — see comment above) ----------
+  function lbRankBadge(rank) {
+    if (rank === 1) return '🥇';
+    if (rank === 2) return '🥈';
+    if (rank === 3) return '🥉';
+    return '#' + rank;
   }
 
-  async function renderCustomLeaderboard() {
-    if (!leaderboardSnapshot) leaderboardSnapshot = captureLeaderboardDom();
-    if (!leaderboardSnapshot) return;
-    if (!CONFIG.LEADERBOARD_API_BASE) {
-      console.warn('[cco-pricedata] LEADERBOARD_API_BASE is not set — nothing to show for Pricedata Value.');
-      return;
-    }
+  function lbRowHtml(entry) {
+    const url = entry.avatarUrl ? escapeHtml(entry.avatarUrl) : '';
+    const initial = escapeHtml((entry.username || '?').charAt(0).toUpperCase());
+    // Real case-clicker.com profile URLs are /profile/<userId> (confirmed live via the site's
+    // own nav-bar profile link) — entry.userId is the real case-clicker user id, so this
+    // always points at the correct player, unlike the old DOM-mutation approach.
+    return `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #333;">
+        <span style="width:28px;text-align:center;font-weight:600;flex-shrink:0;">${lbRankBadge(entry.rank)}</span>
+        <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:#333;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px;">${
+          url ? `<img src="${url}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';this.parentElement.textContent='${initial}';">` : initial
+        }</div>
+        <a href="/profile/${escapeHtml(entry.userId || '')}" target="_blank" rel="noopener" style="flex:1;color:#fff;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(entry.username || 'Unknown')}</a>
+        <span style="color:#f60;font-weight:600;white-space:nowrap;">${fmtFull(entry.totalValue)}</span>
+      </div>`;
+  }
+
+  async function showLeaderboardModal() {
+    const old = document.getElementById('cco-lb-modal');
+    if (old) old.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'cco-lb-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100000;' +
+      'display:flex;align-items:center;justify-content:center;';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeLeaderboardModal(); });
+
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:#1a1a1e;border:1px solid #f60;border-radius:8px;padding:20px 24px;' +
+      'max-width:480px;width:90%;max-height:80vh;overflow:auto;color:#fff;font-size:14px;font-family:inherit;';
+    panel.innerHTML = '<div style="font-size:18px;font-weight:600;margin-bottom:12px;">Pricedata Value Leaderboard</div>' +
+      '<div id="cco-lb-rows" style="opacity:.6;">Loading…</div>';
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText = 'margin-top:16px;background:#f60;color:#000;border:none;border-radius:4px;' +
+      'padding:8px 16px;cursor:pointer;font-weight:600;';
+    closeBtn.addEventListener('click', closeLeaderboardModal);
+    panel.appendChild(closeBtn);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
     const entries = await fetchLeaderboard(50);
-    if (!leaderboardActive) return; // user switched category again while this was in flight
+    if (!leaderboardActive || !document.getElementById('cco-lb-modal')) return; // closed/switched while loading
+    const rowsEl = panel.querySelector('#cco-lb-rows');
+    rowsEl.style.opacity = '1';
+    rowsEl.innerHTML = entries.length
+      ? entries.map(lbRowHtml).join('')
+      : '<div style="opacity:.6;padding:12px 0;">No submissions yet.</div>';
+  }
 
-    const { group, tbody, rowTemplate } = leaderboardSnapshot;
-    // Podium DOM order is 2nd/1st/3rd place (tallest stack in the middle) — only the 3 DIRECT
-    // Stack children of this Group are podium slots (see captureLeaderboardDom for why).
-    const stacks = [...group.children].filter(c => c.classList.contains('mantine-Stack-root'));
-    const podiumSlots = [entries[1], entries[0], entries[2]];
-    stacks.forEach((stack, i) => {
-      const entry = podiumSlots[i];
-      const texts = [...stack.querySelectorAll('p.mantine-Text-root')];
-      const avatarImg = stack.querySelector('img.mantine-Avatar-image');
-      if (!entry) { texts.forEach(p => { p.textContent = '—'; }); return; }
-      if (texts[0]) texts[0].textContent = entry.username || 'Unknown';
-      if (texts[1]) texts[1].textContent = Math.round(entry.totalValue).toLocaleString('en-US');
-      if (texts[2]) texts[2].textContent = fmtFull(entry.totalValue);
-      if (avatarImg && entry.avatarUrl) avatarImg.src = entry.avatarUrl;
-    });
-
-    tbody.innerHTML = '';
-    entries.slice(3).forEach((entry, i) => {
-      const tr = rowTemplate.cloneNode(true);
-      const tds = [...tr.querySelectorAll('td')];
-      // Name cell is a Group containing an Avatar img + a name <p> — mutate both in place
-      // instead of wiping the cell, so submitted profile pictures actually show up here.
-      if (tds[0]) tds[0].textContent = '#' + (i + 4);
-      if (tds[1]) {
-        const avatarImg = tds[1].querySelector('img.mantine-Avatar-image');
-        const nameP = tds[1].querySelector('p.mantine-Text-root');
-        if (avatarImg) { if (entry.avatarUrl) avatarImg.src = entry.avatarUrl; else avatarImg.removeAttribute('src'); }
-        if (nameP) nameP.textContent = entry.username || 'Unknown';
-        else tds[1].textContent = entry.username || 'Unknown';
-      }
-      if (tds[3]) tds[3].textContent = Math.round(entry.totalValue).toLocaleString('en-US');
-      if (tds[4]) tds[4].textContent = fmtFull(entry.totalValue);
-      tbody.appendChild(tr);
-    });
+  function closeLeaderboardModal() {
+    const el = document.getElementById('cco-lb-modal');
+    if (el) el.remove();
   }
 
   function hookLeaderboardPage() {
     if (location.pathname !== '/leaderboard') {
       leaderboardActive = false;
-      leaderboardSnapshot = null;
+      closeLeaderboardModal();
       return;
     }
     hookCategoryDropdown();
