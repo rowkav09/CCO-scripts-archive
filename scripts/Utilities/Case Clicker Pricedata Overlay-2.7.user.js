@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      4.6
+// @version      4.7
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -763,7 +763,10 @@
       const premierRankId = premier && typeof premier.premierRankId === 'number' ? premier.premierRankId : null;
       await origFetch(CONFIG.LEADERBOARD_API_BASE.replace(/\/$/, '') + '/api/submit-score', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // X-CCO-Client: the API now rejects submissions without this tag (added after someone
+        // posted forged entries — "ROWAN"/userId "7" and "Demo" with a 999-trillion total —
+        // straight to the endpoint with curl/devtools). Must match CLIENT_TAG in submit-score.js.
+        headers: { 'Content-Type': 'application/json', 'X-CCO-Client': 'cco-overlay-v1' },
         body: JSON.stringify({ userId, username, avatarUrl, totalValue: grandCalc, nativeValue: grandNative, premierRating, premierRankId }),
       });
     } catch (e) {
@@ -1235,6 +1238,27 @@
     img.src = url;
   }
 
+  // The big yellow-bar number (texts[1] on the podium, tds[3] in the table) is NOT the $
+  // total — confirmed live against the site's own "Premier rating" category, which shows a
+  // completely different number there (the account's XP) than in the small text underneath
+  // (the actual category value). Reusing that slot for our own totalValue (as an earlier
+  // version did) just clobbered it with a mislabeled dollar figure. Since we already capture
+  // Premier rating/rank for every submission, that's the genuinely useful thing to put there.
+  function premierLabel(entry) {
+    return entry.premierRating != null ? Math.round(entry.premierRating).toLocaleString('en-US') : '—';
+  }
+
+  // cloneNode(true) copies markup only — none of React's click handlers survive, which is why
+  // clicking a user on this cloned leaderboard has never done anything (confirmed live: this
+  // is equally true of the site's own native categories right now, not something we broke).
+  // Profile URLs are plain /profile/<userId> (confirmed live), so wire up real navigation by
+  // hand on both the podium and the table rows.
+  function makeClickable(el, userId) {
+    if (!el || !userId) return;
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', () => { window.location.href = '/profile/' + userId; });
+  }
+
   async function renderCustomLeaderboard() {
     const overlay = showCustomLeaderboardClone();
     if (!overlay) return;
@@ -1252,9 +1276,10 @@
       const avatarImg = stack.querySelector('img.mantine-Avatar-image');
       if (!entry) { texts.forEach(p => { p.textContent = '—'; }); setAvatarSrc(avatarImg, null); return; }
       if (texts[0]) texts[0].textContent = entry.username || 'Unknown';
-      if (texts[1]) texts[1].textContent = Math.round(entry.totalValue).toLocaleString('en-US');
+      if (texts[1]) texts[1].textContent = premierLabel(entry);
       if (texts[2]) texts[2].textContent = fmtFull(entry.totalValue);
       setAvatarSrc(avatarImg, entry.avatarUrl);
+      makeClickable(stack, entry.userId);
     });
 
     cloneTbody.innerHTML = '';
@@ -1269,8 +1294,9 @@
         if (nameP) nameP.textContent = entry.username || 'Unknown';
         else tds[1].textContent = entry.username || 'Unknown';
       }
-      if (tds[3]) tds[3].textContent = Math.round(entry.totalValue).toLocaleString('en-US');
+      if (tds[3]) tds[3].textContent = premierLabel(entry);
       if (tds[4]) tds[4].textContent = fmtFull(entry.totalValue);
+      makeClickable(tr, entry.userId);
       cloneTbody.appendChild(tr);
     });
   }
