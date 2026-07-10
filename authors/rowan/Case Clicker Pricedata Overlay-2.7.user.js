@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      4.8
+// @version      4.9
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -291,7 +291,15 @@
       if (extVal == null) extVal = parseMagnitude(row[2]);
       if (extVal != null) {
         base = extVal;
-        if (skin.statTrak) { const adj = parseAdjustment(row[9]); if (adj) base = applyAdjustment(base, adj); }
+        // Skin Group "Knife08" (e.g. Nomad Knife | Fade '100% Fade') is a documented exception
+        // straight from the reference bot: its ST column ("ST (MW)" in the sheet) is only ever
+        // populated for the Minimal Wear copy — applying it to Factory New too (as this used to
+        // do) inflated FN StatTrak cards by the MW-only multiplier. Confirmed live: FN ST 100%
+        // Fade Nomad Knife should price the same as the non-ST FN copy, not FN base * ST * EV.
+        const skipStForKnife08FN = skinGroupValue === 'Knife08' && skin.exterior === 'Factory New';
+        if (skin.statTrak) {
+          if (!skipStForKnife08FN) { const adj = parseAdjustment(row[9]); if (adj) base = applyAdjustment(base, adj); }
+        }
         else if (skin.souvenir) { const adj = parseAdjustment(row[10]); if (adj) base = applyAdjustment(base, adj); }
         // EV (event) multiplier ONLY applies to actual event skins. Confirmed via /price
         // ground truth: a non-event Crimson Web 'Centered Web' Stiletto Knife (BS, quality 2)
