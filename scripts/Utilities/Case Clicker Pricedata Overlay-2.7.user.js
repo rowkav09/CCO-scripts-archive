@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      4.3
+// @version      4.4
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -117,6 +117,13 @@
     if (str[0] === 'x' || str[0] === 'X') { const v = parseFloat(str.slice(1)); return isNaN(v) ? null : { type: 'mult', value: v }; }
     if (str[0] === '+') { const v = parseMagnitude(str.slice(1)); return v == null ? null : { type: 'add', value: v }; }
     if (str[0] === '-') { const v = parseMagnitude(str.slice(1)); return v == null ? null : { type: 'add', value: -v }; }
+    // Some rows give a flat set price instead of a multiplier/adjustment — e.g. an EV cell of
+    // "3.0M" rather than "x3". No leading x/+/- means it's not a multiplier or an offset, it's
+    // the final dollar figure to use outright. Confirmed live: several EV cells in the Doppler
+    // tab mix "x3"-style multipliers with bare "3.0M"-style set values in the same column —
+    // the bare ones were silently falling through to null (no bonus applied at all) before.
+    const setVal = parseMagnitude(str);
+    if (setVal != null) return { type: 'set', value: setVal };
     return null;
   }
 
@@ -234,6 +241,17 @@
     '65a652acfdd7ea906a8f8768': 800000,   // Talon Knife | Fade '80% Fade'
   };
 
+  // Applies a parsed ST/SV/EV cell to a running base price. 'mult' (e.g. "x3") multiplies,
+  // 'add' (e.g. "+50000"/"-50000") offsets, and 'set' (a bare value like "3.0M" with no
+  // leading x/+/-) replaces the base outright — some sheet rows give a flat final price for
+  // an adjustment instead of a multiplier, and treating a "set" value as if it were "add"
+  // (the old fallback for anything non-'mult') would have produced a wildly wrong total.
+  function applyAdjustment(base, adj) {
+    if (adj.type === 'mult') return base * adj.value;
+    if (adj.type === 'set') return adj.value;
+    return base + adj.value; // 'add'
+  }
+
   function calcPrice(skin) {
     const native = (typeof skin.price === 'number' ? skin.price : skin.weaponPrice) || 0;
     if (!dataReady) return { calc: native, native, source: 'loading' };
@@ -247,15 +265,15 @@
       if (extVal == null) extVal = parseMagnitude(row[2]);
       if (extVal != null) {
         base = extVal;
-        if (skin.statTrak) { const adj = parseAdjustment(row[9]); if (adj) base = adj.type === 'mult' ? base * adj.value : base + adj.value; }
-        else if (skin.souvenir) { const adj = parseAdjustment(row[10]); if (adj) base = adj.type === 'mult' ? base * adj.value : base + adj.value; }
+        if (skin.statTrak) { const adj = parseAdjustment(row[9]); if (adj) base = applyAdjustment(base, adj); }
+        else if (skin.souvenir) { const adj = parseAdjustment(row[10]); if (adj) base = applyAdjustment(base, adj); }
         // EV (event) multiplier ONLY applies to actual event skins. Confirmed via /price
         // ground truth: a non-event Crimson Web 'Centered Web' Stiletto Knife (BS, quality 2)
         // priced at exactly base*7^quality with NO EV applied ($7.84M) — applying EV
         // unconditionally was tried and contradicted by the bot, so this stays gated.
         if (skin.event) {
           const ev = parseAdjustment(row[11]);
-          if (ev && ev.type === 'mult') base *= ev.value;
+          if (ev) base = applyAdjustment(base, ev);
           else if (EVENT_EV_FALLBACK_BY_PATTERN_ID[skin.patternId] != null) base = EVENT_EV_FALLBACK_BY_PATTERN_ID[skin.patternId];
         }
       }
