@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      4.9
+// @version      5.0
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -19,6 +19,13 @@
     SHEET_ID: '1DmJr6L6oIUZPDUZBg0DxnqZ8Xhk7nhzLOy6jv3yi02A',
     PRICE_DATA_GID: 1858636668,
     LIST_GID: 1167749951,
+    // The List tab specifically is now served from a "Publish to web" CSV link instead of the
+    // gviz/tq export — per explicit instruction. Note this pub link is scoped to just the List
+    // sheet (Google's per-sheet publish, not "entire document") — confirmed live that the same
+    // pub ID does NOT resolve other gids (PriceData, pattern tabs), so those still go through
+    // csvUrl()/gviz below. If those get published too, give this the new pub ID and this can
+    // be generalized the same way.
+    LIST_PUB_ID: '2PACX-1vQHX9j8A3dRJrJS-J7Zs7PcIAC-5CgBydhFVOELd92PqPZY2VdJXEDtk4AIDgVl1-lnO_JcV3pBGouy',
     // "List" is the flattened/curated sheet this script was originally built to read, but
     // it isn't kept fully in sync with the per-pattern "theme" tabs (e.g. it was missing
     // Karambit | Marble Fade (Fire and Ice), which does exist over in the Fade(Knife) tab).
@@ -39,6 +46,17 @@
     ],
     REFRESH_MS: 5 * 60 * 1000,
     CACHE_MS: 60 * 1000,
+    // Persisted (localStorage-backed) cache for the inline "Pricedata value" total — survives
+    // page navigation, unlike totalsCache/globalSortedCache which are in-memory only and reset
+    // on every reload. Long TTL on purpose: this number is only ever refreshed by an explicit
+    // click now (see triggerTotalsCalculation), so there's no harm showing a slightly-stale
+    // cached figure instantly rather than re-scanning every visit.
+    LOCAL_CACHE_MS: 10 * 60 * 1000,
+    // Delay between successive page fetches in fetchAllSkins — a full inventory/storage-unit
+    // scan used to fire every page request at once (Promise.all), which was tripping the
+    // site's rate limiter on larger inventories/storage units. Sequential + a small gap is
+    // slower but reliable. Applies to both inventory and storage-unit scans (same function).
+    FETCH_DELAY_MS: 350,
     QUALITY_BASE: 7,
     // Fill this in once you've deployed the Vercel API (see the two files provided alongside
     // this script: api/submit-score.js and api/leaderboard.js). Leave blank to disable the
@@ -75,6 +93,9 @@
   // ---------- CSV helpers ----------
   function csvUrl(gid) {
     return `https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/gviz/tq?tqx=out:csv&gid=${gid}`;
+  }
+  function listCsvUrl() {
+    return `https://docs.google.com/spreadsheets/d/e/${CONFIG.LIST_PUB_ID}/pub?gid=${CONFIG.LIST_GID}&single=true&output=csv`;
   }
 
   function parseCSV(text) {
@@ -178,7 +199,7 @@
       const patternFetches = CONFIG.PATTERN_TAB_GIDS.map(gid => origFetch(csvUrl(gid)).then(r => r.text()));
       const [pdText, listText, ...patternTexts] = await Promise.all([
         origFetch(csvUrl(CONFIG.PRICE_DATA_GID)).then(r => r.text()),
-        origFetch(csvUrl(CONFIG.LIST_GID)).then(r => r.text()),
+        origFetch(listCsvUrl()).then(r => r.text()),
         ...patternFetches,
       ]);
       const pdRows = parseCSV(pdText);
@@ -508,13 +529,24 @@
       ? `/api/inventory/storageUnits/skins?id=${ctx.id}&page=${page}&sort=${encodeURIComponent(s)}`
       : `/api/inventory?page=${page}&sort=${encodeURIComponent(s)}&showStickers=true&showUpgradedSkins=true`;
   }
-  async function fetchAllSkins(ctx) {
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  // Sequential with a small delay between requests — this used to fire every page of a
+  // scan at once via Promise.all, which was tripping the site's rate limiter on bigger
+  // inventories/storage units (missing prices, broken sort — the response for a burst
+  // request would come back empty/erroring and we'd silently rank it wrong). Slower, but
+  // it actually finishes correctly. Shared by both inventory and storage-unit scans.
+  async function fetchAllSkins(ctx, onProgress) {
     const first = await origFetch(listUrlFor(ctx, 1), { credentials: 'include' }).then(r => r.json());
     const pages = first.pages || 1;
     const all = [...(first.skins || [])];
-    const fetches = [];
-    for (let p = 2; p <= pages; p++) fetches.push(origFetch(listUrlFor(ctx, p), { credentials: 'include' }).then(r => r.json()));
-    (await Promise.all(fetches)).forEach(d => all.push(...(d.skins || [])));
+    onProgress && onProgress(1, pages);
+    for (let p = 2; p <= pages; p++) {
+      await sleep(CONFIG.FETCH_DELAY_MS);
+      const d = await origFetch(listUrlFor(ctx, p), { credentials: 'include' }).then(r => r.json());
+      all.push(...(d.skins || []));
+      onProgress && onProgress(p, pages);
+    }
     return all;
   }
 
@@ -541,27 +573,69 @@
     globalSortedCache.set(key, Object.assign({}, cached, { pending: true, promise }));
     return promise;
   }
-  async function getCachedTotals() {
+  // Persisted (localStorage) sibling of totalsCache — survives navigation/reloads, unlike the
+  // in-memory Map. Read-only helpers; only triggerTotalsCalculation() ever writes to it.
+  function loadPersistedTotals(key) {
+    try {
+      const raw = localStorage.getItem('cco_totals_' + key);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj.calc !== 'number' || typeof obj.native !== 'number' || typeof obj.ts !== 'number') return null;
+      return obj;
+    } catch (e) { return null; }
+  }
+  function savePersistedTotals(key, calc, native) {
+    try { localStorage.setItem('cco_totals_' + key, JSON.stringify({ calc, native, ts: Date.now() })); } catch (e) { /* storage full/blocked — cache is best-effort */ }
+  }
+
+  // Read-only: never fetches. Inventory/storage-unit scans used to run automatically on
+  // every tick (every few seconds while the page was open), which was hammering the site's
+  // API hard enough to get rate-limited — that's what was breaking both the price display
+  // and the global sort. Now the only things that ever call fetchAllSkins are explicit user
+  // actions (this click, the Sort dropdown's "Pricedata" option, or the Scan All button).
+  // This just answers "do we already know the total" from memory or a fresh-enough
+  // localStorage cache — if not, the caller (renderInlineTotal) shows a click prompt instead.
+  function getCachedTotals() {
     const ctx = currentContext();
     if (!ctx) return null;
     const key = ctx.type === 'su' ? 'su:' + ctx.id : 'inv';
     const cached = totalsCache.get(key);
-    if (cached && Date.now() - cached.ts < CONFIG.CACHE_MS) return cached;
-    if (cached && cached.pending) return cached;
-    totalsCache.set(key, Object.assign({}, cached, { pending: true }));
-    try {
-      const all = await fetchAllSkins(ctx);
-      let calc = 0, native = 0;
-      all.forEach(s => { if (!isIncluded(s._id)) return; const r = calcPrice(s); calc += r.calc; native += r.native; });
-      const res = { calc, native, ts: Date.now(), pending: false };
-      totalsCache.set(key, res);
-      scheduleTick();
-      return res;
-    } catch (e) {
-      console.error('[cco-pricedata] totals failed', e);
-      totalsCache.set(key, Object.assign({}, cached, { pending: false }));
-      return cached || null;
+    if (cached && !cached.pending && Date.now() - cached.ts < CONFIG.CACHE_MS) return cached;
+    const persisted = loadPersistedTotals(key);
+    if (persisted && Date.now() - persisted.ts < CONFIG.LOCAL_CACHE_MS) {
+      totalsCache.set(key, Object.assign({}, persisted, { pending: false }));
+      return persisted;
     }
+    return cached && cached.pending ? cached : null;
+  }
+
+  // The actual fetch-and-compute, only ever run from an explicit click (see renderInlineTotal).
+  async function triggerTotalsCalculation() {
+    const ctx = currentContext();
+    if (!ctx) return null;
+    const key = ctx.type === 'su' ? 'su:' + ctx.id : 'inv';
+    const already = totalsCache.get(key);
+    if (already && already.pending) return already.pending;
+    const promise = (async () => {
+      try {
+        const all = await fetchAllSkins(ctx);
+        let calc = 0, native = 0;
+        all.forEach(s => { if (!isIncluded(s._id)) return; const r = calcPrice(s); calc += r.calc; native += r.native; });
+        const res = { calc, native, ts: Date.now(), pending: false };
+        totalsCache.set(key, res);
+        savePersistedTotals(key, calc, native);
+        renderInlineTotal();
+        return res;
+      } catch (e) {
+        console.error('[cco-pricedata] totals failed', e);
+        totalsCache.delete(key);
+        renderInlineTotal();
+        return null;
+      }
+    })();
+    totalsCache.set(key, { pending: promise });
+    renderInlineTotal();
+    return promise;
   }
   // ---------- Full scan (inventory + every storage unit) ----------
   async function fetchStorageUnitsList() {
@@ -1091,6 +1165,11 @@
     return null;
   }
 
+  // No longer auto-fetches (see getCachedTotals/triggerTotalsCalculation above) — a full
+  // inventory or storage-unit scan only ever runs from an explicit click now, to avoid
+  // hammering the site's API (and getting rate-limited) just from having the page open.
+  // Three states: a fresh cached/persisted number (click to refresh), a scan in flight
+  // ("calculating…"), or nothing yet (click prompt).
   let inlineTotalEl = null;
   function renderInlineTotal() {
     const ctx = currentContext();
@@ -1100,16 +1179,22 @@
     if (!inlineTotalEl || !inlineTotalEl.isConnected) {
       inlineTotalEl = document.createElement('p');
       inlineTotalEl.className = 'mantine-Text-root';
-      inlineTotalEl.style.cssText = 'font-size:12px;opacity:.85;margin-top:2px;color:#f60;';
+      inlineTotalEl.style.cssText = 'font-size:12px;opacity:.85;margin-top:2px;color:#f60;cursor:pointer;';
+      inlineTotalEl.addEventListener('click', () => { triggerTotalsCalculation(); });
       valueEl.insertAdjacentElement('afterend', inlineTotalEl);
     }
     const key = ctx.type === 'su' ? 'su:' + ctx.id : 'inv';
-    const cached = totalsCache.get(key);
-    if (cached && cached.calc != null) {
-      inlineTotalEl.textContent = `Pricedata value: ${fmtFull(cached.calc)}`;
+    const raw = totalsCache.get(key);
+    const cached = getCachedTotals();
+    if (raw && raw.pending) {
+      inlineTotalEl.textContent = 'Pricedata value: calculating…';
+      inlineTotalEl.title = '';
+    } else if (cached && cached.calc != null) {
+      inlineTotalEl.textContent = `Pricedata value: ${fmtFull(cached.calc)} (click to refresh)`;
       inlineTotalEl.title = `Native: ${fmtFull(cached.native)}`;
     } else {
-      inlineTotalEl.textContent = 'Pricedata value: calculating…';
+      inlineTotalEl.textContent = 'Pricedata value: click to calculate';
+      inlineTotalEl.title = 'Fetches every page of this inventory/storage unit — click when ready.';
     }
   }
 
@@ -1335,9 +1420,11 @@
     }
     updateExtraCardPrices();
     addCopyBtns();
+    // renderInlineTotal() is now a plain (synchronous, non-fetching) render — it shows
+    // whatever's already cached/persisted, or a click prompt if nothing's been calculated
+    // yet. The actual scan (fetchAllSkins) only runs from that click now, not from every tick.
     renderInlineTotal();
     if (ctx && ctx.type === 'inv') injectScanButton();
-    if (ctx) getCachedTotals().then(() => { renderInlineTotal(); }).catch(() => {});
     hookLeaderboardPage();
   }
 
