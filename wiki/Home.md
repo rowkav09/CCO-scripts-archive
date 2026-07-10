@@ -7,7 +7,7 @@
 See the full repository ranking, including scripts with no votes, on the [[Leaderboard]] page.
 
 **Last Updated:** Auto-updated on each change  
-**Total Scripts:** 35
+**Total Scripts:** 36
 
 ### Categories
 
