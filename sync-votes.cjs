@@ -179,7 +179,7 @@ function listAllScripts() {
   for (const folder of folders) {
     const categoryDir = path.join(scriptsRoot, folder);
     const files = fs.readdirSync(categoryDir)
-      .filter(file => file.endsWith('.js') && !file.startsWith('.'))
+      .filter(file => file.endsWith('.user.js') && !file.startsWith('.'))
       .sort((left, right) => left.localeCompare(right));
 
     for (const file of files) {

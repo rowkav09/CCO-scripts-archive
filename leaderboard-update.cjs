@@ -14,7 +14,7 @@ function getAllScriptFiles(dir) {
     .flatMap(entry => {
       const entryPath = path.join(dir, entry.name);
       if (entry.isDirectory()) return getAllScriptFiles(entryPath);
-      return entry.name.endsWith('.js') && !entry.name.startsWith('.') ? [entryPath] : [];
+      return entry.name.endsWith('.user.js') && !entry.name.startsWith('.') ? [entryPath] : [];
     });
 }
 
