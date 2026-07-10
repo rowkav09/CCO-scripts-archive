@@ -117,8 +117,8 @@ jobs:
 
       - name: Commit Changes
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "rowkav09"
+          git config user.email "rowkav0809@highgateschool.org.uk"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
 
           git add -A README.md wiki .github/ISSUE_TEMPLATE authors/ scripts/
@@ -147,8 +147,8 @@ jobs:
           git clone --depth 1 --branch master "https://x-access-token:${WIKI_TOKEN}@github.com/${{ github.repository }}.wiki.git" "$wiki_sync_dir"
           rsync -a --delete --exclude='.git' wiki/ "$wiki_sync_dir"/
 
-          git -C "$wiki_sync_dir" config user.name "github-actions[bot]"
-          git -C "$wiki_sync_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$wiki_sync_dir" config user.name "rowkav09"
+          git -C "$wiki_sync_dir" config user.email "rowkav0809@highgateschool.org.uk"
 
           git -C "$wiki_sync_dir" add -A
 
