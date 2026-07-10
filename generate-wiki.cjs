@@ -55,7 +55,7 @@ const CATEGORY_BY_FOLDER = new Map(CATEGORY_SPECS.map(spec => [spec.folder, spec
 const WIKI_FILES = new Set(['Home.md', 'Leaderboard.md', ...CATEGORY_SPECS.map(spec => spec.page)]);
 
 function isScriptFile(file) {
-  return (file.endsWith('.js') || file.endsWith('.user.js')) && file !== 'index.js' && !file.startsWith('.');
+  return file.endsWith('.user.js') && !file.startsWith('.');
 }
 
 function collectScriptFiles(dirPath, relativeDir = '') {

@@ -29,7 +29,7 @@ function getAllScripts(dir) {
     if (entry.isDirectory()) {
       // Skip the authors folder itself if it ends up inside scripts somehow
       results.push(...getAllScripts(full));
-    } else if (entry.isFile() && entry.name.endsWith('.js')) {
+    } else if (entry.isFile() && entry.name.endsWith('.user.js')) {
       results.push(full);
     }
   }
@@ -80,7 +80,7 @@ for (const [authorDir, files] of Object.entries(authorMap)) {
   ];
 
   for (const { src, filename } of files) {
-    // category = second path segment e.g. scripts/enhancements/foo.js -> enhancements
+    // category = second path segment e.g. scripts/enhancements/foo.user.js -> enhancements
     const parts    = src.split(path.sep);
     const category = parts.length > 2 ? parts[1] : '—';
     const repoPath = src.replace(/\\/g, '/');
