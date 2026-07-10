@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      3.4
+// @version      3.9
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), and a copy-link button on trade/chat/other-SU cards.
 // @match        https://case-clicker.com/*
 // @grant        none
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/rowkav09/CCO-scripts-archive/main/scripts/Utilities/Case%20Clicker%20Pricedata%20Overlay-2.7.user.js
+// @downloadURL  https://raw.githubusercontent.com/rowkav09/CCO-scripts-archive/main/scripts/Utilities/Case%20Clicker%20Pricedata%20Overlay-2.7.user.js
 // ==/UserScript==
 
 (function () {
@@ -38,6 +40,10 @@
     REFRESH_MS: 5 * 60 * 1000,
     CACHE_MS: 60 * 1000,
     QUALITY_BASE: 7,
+    // Fill this in once you've deployed the Vercel API (see the two files provided alongside
+    // this script: api/submit-score.js and api/leaderboard.js). Leave blank to disable the
+    // leaderboard feature entirely (no submissions, no custom category on /leaderboard).
+    LEADERBOARD_API_BASE: '', // e.g. 'https://your-project.vercel.app'
   };
 
   const EXT_COL = { 'Factory New': 4, 'Minimal Wear': 5, 'Field-Tested': 6, 'Well-Worn': 7, 'Battle-Scarred': 8 };
@@ -240,7 +246,17 @@
       }
     }
 
-    if (base == null) {
+    // The generic PriceData sheet (flat name -> price) holds Steam-market-style prices for
+    // BASE skins with no notable pattern — it is NOT a substitute for per-pattern data. Bug:
+    // this used to run for ANY skin once `base` was still null, including patterned items
+    // whose specific patternId just isn't one we have sheet data for (e.g. the game's own
+    // low/common "Tier 1"-"Tier 5" pattern buckets, which never appear in any pattern tab).
+    // stripPatternFromName() strips the quoted "'Tier 4'" label right back off, so it was
+    // matching the flat base-skin row and overriding the correct native/QS price with an
+    // unrelated Steam market number. Patterned items with no per-pattern sheet match should
+    // fall straight through to native/QS below instead — only NON-patterned items (plain gun
+    // skins, gloves, agents, etc.) are meant to use this flat lookup.
+    if (base == null && !skin.hasPattern) {
       const cleanName = stripPatternFromName(skin.name || '');
       if (priceDataByName.has(skin.name)) base = priceDataByName.get(skin.name);
       else if (priceDataByName.has(cleanName)) base = priceDataByName.get(cleanName);
@@ -336,6 +352,48 @@
     }
     toggle.dataset.skinId = skin._id;
     toggle.style.background = isIncluded(skin._id) ? '#f60' : 'transparent';
+  }
+
+  // ---------- Generic price overlay (trade board + "Add skins to trade" modal) ----------
+  // The trade page (both my side and the other player's side of the board) and the
+  // "Add skins to trade" picker modal never go through our own window.fetch takeover —
+  // the board updates over what looks like a websocket/live-sync channel, and the modal's
+  // item list is entirely client-side (opening it and paging through it fires zero network
+  // requests), so there's no response body for us to intercept or pair against
+  // `currentPageSkins` like on /inventory and storage-unit pages. Instead we read the skin
+  // object straight off each card's own React fiber (Mantine Card components receive it as
+  // a `skin` prop a few hops up) — this works regardless of route, pagination style, or
+  // how the card's data got there. Cards already handled by the index-paired
+  // updateCardPrices() above are skipped (they already carry the ccoTooltip marker), so this
+  // is purely a fallback for surfaces that function can't reach.
+  function getSkinFromCardFiber(card) {
+    const key = Object.keys(card).find(k => k.startsWith('__reactFiber'));
+    if (!key) return null;
+    let fiber = card[key];
+    let hops = 0;
+    while (fiber && hops < 30) {
+      const props = fiber.memoizedProps;
+      if (props && props.skin && typeof props.skin === 'object') return props.skin;
+      fiber = fiber.return;
+      hops++;
+    }
+    return null;
+  }
+
+  function updateExtraCardPrices() {
+    const cards = document.querySelectorAll('.mantine-Card-root');
+    cards.forEach(card => {
+      if (!card.offsetParent) return; // skip hidden/duplicate nodes (e.g. trade board's offscreen animation copies)
+      const badge = [...card.querySelectorAll('.mantine-Badge-label')].find(e => /^\$[\d,]+\.\d{2}$/.test(e.textContent.trim()));
+      if (!badge || badge.dataset.ccoTooltip) return; // no price badge here, or already handled
+      const skin = getSkinFromCardFiber(card);
+      if (!skin) return;
+      const { calc, native } = calcPrice(skin);
+      const calcText = fmtFull(calc);
+      if (badge.textContent.trim() !== calcText) badge.textContent = calcText;
+      badge.dataset.ccoTooltip = '1';
+      attachTooltip(badge, () => `Native price: ${fmtFull(native)}`);
+    });
   }
 
   // ---------- Copy-link button ----------
@@ -476,6 +534,12 @@
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // Persisted (unlike the per-card include toggle) since this is a one-time privacy choice
+  // about broadcasting your name/avatar/net worth, not a per-scan ephemeral setting. Defaults
+  // OFF — submitting is opt-in, never silent.
+  function lbSubmitEnabled() { return localStorage.getItem('cco_lbSubmitEnabled') === 'true'; }
+  function setLbSubmitEnabled(on) { localStorage.setItem('cco_lbSubmitEnabled', on ? 'true' : 'false'); }
+
   function showScanResultsModal(results) {
     const old = document.getElementById('cco-scan-modal');
     if (old) old.remove();
@@ -509,6 +573,53 @@
         <span>Grand total (native)</span><span>${fmtFull(results.grandNative)}</span>
       </div>
     `;
+
+    // Leaderboard opt-in row. Only shown once you've actually configured an API base — no
+    // point offering a toggle that has nowhere to send data.
+    if (CONFIG.LEADERBOARD_API_BASE) {
+      const lbRow = document.createElement('div');
+      lbRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;' +
+        'padding:10px 0 0;margin-top:10px;border-top:1px solid #444;';
+      const label = document.createElement('div');
+      label.innerHTML = '<div>Submit to Leaderboard</div>' +
+        '<div style="opacity:.6;font-size:11px;">Shares your name, avatar, and this total publicly</div>';
+      const toggle = document.createElement('div');
+      toggle.style.cssText = 'width:40px;height:22px;border-radius:11px;cursor:pointer;flex-shrink:0;' +
+        'border:2px solid #f60;box-sizing:border-box;position:relative;transition:background .15s;';
+      const knob = document.createElement('div');
+      knob.style.cssText = 'width:14px;height:14px;border-radius:50%;background:#f60;position:absolute;' +
+        'top:2px;left:2px;transition:left .15s;';
+      toggle.appendChild(knob);
+      const status = document.createElement('div');
+      status.style.cssText = 'font-size:11px;opacity:.7;margin-top:6px;text-align:right;';
+
+      function paint(on) {
+        knob.style.left = on ? '20px' : '2px';
+        toggle.style.background = on ? 'rgba(255,102,0,.3)' : 'transparent';
+      }
+
+      async function doSubmit() {
+        status.textContent = 'Submitting…';
+        await submitToLeaderboard(results.grandCalc, results.grandNative);
+        if (lbSubmitEnabled()) status.textContent = 'Submitted ✓';
+      }
+
+      paint(lbSubmitEnabled());
+      if (lbSubmitEnabled()) doSubmit(); // already opted in from a previous scan — submit this run's fresh total too
+
+      toggle.addEventListener('click', () => {
+        const next = !lbSubmitEnabled();
+        setLbSubmitEnabled(next);
+        paint(next);
+        if (next) doSubmit(); else status.textContent = '';
+      });
+
+      lbRow.appendChild(label);
+      lbRow.appendChild(toggle);
+      panel.appendChild(lbRow);
+      panel.appendChild(status);
+    }
+
     const closeBtn = document.createElement('button');
     closeBtn.textContent = 'Close';
     closeBtn.style.cssText = 'margin-top:16px;background:#f60;color:#000;border:none;border-radius:4px;' +
@@ -534,6 +645,56 @@
     inner.appendChild(document.createTextNode(text));
   }
 
+  // ---------- Inventory-value leaderboard (backed by your own Vercel API) ----------
+  // Contract (see api/submit-score.js + api/leaderboard.js shipped alongside this script):
+  //   POST {LEADERBOARD_API_BASE}/api/submit-score
+  //     body: { userId, username, avatarUrl, totalValue, nativeValue }  -> { ok: true }
+  //   GET  {LEADERBOARD_API_BASE}/api/leaderboard?limit=50
+  //     -> { entries: [{ rank, userId, username, avatarUrl, totalValue, nativeValue, updatedAt }] }
+  // /api/me is the game-stats endpoint (money, xp, limits, etc.) — it has no user identity
+  // fields at all. Identity (id/name/image) actually lives on the auth session endpoint,
+  // confirmed live: GET /api/auth/get-session -> { session, user: { id, name, image, ... } }.
+  let meCache = null;
+  async function getMe() {
+    if (meCache) return meCache;
+    try {
+      const session = await origFetch('/api/auth/get-session', { credentials: 'include' }).then(r => r.json());
+      meCache = session && session.user ? session.user : null;
+    } catch (e) { meCache = null; }
+    return meCache;
+  }
+
+  async function submitToLeaderboard(grandCalc, grandNative) {
+    if (!CONFIG.LEADERBOARD_API_BASE) return; // feature disabled until a base URL is configured
+    try {
+      const me = await getMe();
+      const userId = me && me.id;
+      if (!userId) return;
+      const username = (me && me.name) || 'Unknown';
+      const avatarUrl = (me && me.image) || null;
+      await origFetch(CONFIG.LEADERBOARD_API_BASE.replace(/\/$/, '') + '/api/submit-score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, username, avatarUrl, totalValue: grandCalc, nativeValue: grandNative }),
+      });
+    } catch (e) {
+      console.error('[cco-pricedata] leaderboard submit failed', e);
+    }
+  }
+
+  async function fetchLeaderboard(limit) {
+    if (!CONFIG.LEADERBOARD_API_BASE) return [];
+    try {
+      const data = await origFetch(
+        CONFIG.LEADERBOARD_API_BASE.replace(/\/$/, '') + '/api/leaderboard?limit=' + (limit || 50)
+      ).then(r => r.json());
+      return (data && data.entries) || [];
+    } catch (e) {
+      console.error('[cco-pricedata] leaderboard fetch failed', e);
+      return [];
+    }
+  }
+
   const SCAN_BTN_LABEL = 'Scan All (Inventory + Storage Units)';
   let scanning = false;
   async function onScanButtonClick(e) {
@@ -542,7 +703,7 @@
     const btn = e.currentTarget;
     try {
       const results = await scanAll((msg) => setButtonLabel(btn, msg));
-      showScanResultsModal(results);
+      showScanResultsModal(results); // leaderboard submission is opt-in via the modal's own toggle
     } catch (err) {
       console.error('[cco-pricedata] scan failed', err);
     } finally {
@@ -821,6 +982,150 @@
     }
   }
 
+  // ---------- /leaderboard page: custom "Pricedata Value" category ----------
+  // The site's own leaderboard (Category select: XP / Premier rating / Clicks / Clicked
+  // cases / Vault money collected / Money earned / Money spent / ...) is backed by stats the
+  // site's own backend computes — it has no concept of our pricedata valuation. We add a
+  // "Pricedata Value" entry to that same Category dropdown (same clone-a-real-option pattern
+  // as the inventory Sort dropdown's "Pricedata" entry) and, when picked, take over the
+  // existing podium (top 3) + table (rest) by mutating their contents in place rather than
+  // hand-building new markup, so it's pixel-identical to every other category. Data comes
+  // from your own Vercel API (see api/submit-score.js + api/leaderboard.js).
+  //
+  // Verified live DOM shape (case-clicker.com/leaderboard):
+  //   - Podium: a .mantine-Group-root containing three .mantine-Stack-root (2nd/1st/3rd
+  //     place, left-to-right). Each Stack has exactly 3 leaf <p class="mantine-Text-root">
+  //     nodes in order: [name, primary bar number, secondary "$..." value].
+  //   - Table: .mantine-Table-table > tbody > tr, one row per rank 4+, each with 5 <td>s:
+  //     [rank "#4", name+avatar Group, (empty spacer), value bar, secondary "$..." value].
+  let leaderboardActive = false;
+  let leaderboardSnapshot = null; // { group, groupHTML, tbody, tbodyHTML, rowTemplate }
+
+  function findCategorySelectRoot() {
+    const label = [...document.querySelectorAll('label')].find(e => e.textContent.trim() === 'Category');
+    return label ? label.closest('.mantine-Select-root') : null;
+  }
+
+  function hookCategoryDropdown() {
+    const root = findCategorySelectRoot();
+    if (!root) return;
+    const input = root.querySelector('input');
+    if (!input || input.dataset.ccoHooked) { if (input) refreshCategoryInputLabel(input); return; }
+    input.dataset.ccoHooked = '1';
+    input.addEventListener('mousedown', () => {
+      setTimeout(injectLeaderboardOption, 30);
+      setTimeout(injectLeaderboardOption, 150);
+    });
+    refreshCategoryInputLabel(input);
+  }
+
+  function injectLeaderboardOption() {
+    const root = findCategorySelectRoot();
+    if (!root) return;
+    const input = root.querySelector('input');
+    const dropdownId = input && input.getAttribute('aria-controls');
+    const dropdown = dropdownId && document.getElementById(dropdownId);
+    if (!dropdown) return;
+    const nativeOptions = [...dropdown.querySelectorAll('[role="option"]')].filter(o => !o.dataset.ccoOption);
+    if (!nativeOptions.length) return;
+    if (!dropdown.dataset.ccoNativeHook) {
+      dropdown.dataset.ccoNativeHook = '1';
+      // Picking any real category hands rendering back to the site — just reload so its own
+      // getServerSideProps fetch runs clean instead of us trying to un-mutate our clone.
+      nativeOptions.forEach(o => o.addEventListener('click', () => { if (leaderboardActive) { leaderboardActive = false; location.reload(); } }));
+    }
+    let custom = dropdown.querySelector('[data-cco-option]');
+    if (!custom) {
+      custom = nativeOptions[0].cloneNode(true);
+      custom.dataset.ccoOption = '1';
+      custom.removeAttribute('data-combobox-option');
+      custom.removeAttribute('id');
+      custom.textContent = 'Pricedata Value';
+      custom.addEventListener('click', (e) => {
+        e.stopPropagation();
+        leaderboardActive = true;
+        renderCustomLeaderboard();
+      });
+      dropdown.appendChild(custom);
+    }
+    const active = leaderboardActive;
+    custom.setAttribute('aria-selected', active ? 'true' : 'false');
+    if (active) { custom.setAttribute('data-checked', 'true'); custom.setAttribute('data-combobox-active', 'true'); }
+    else { custom.removeAttribute('data-checked'); custom.removeAttribute('data-combobox-active'); }
+  }
+
+  function refreshCategoryInputLabel(input) {
+    if (leaderboardActive && input.value !== 'Pricedata Value') input.value = 'Pricedata Value';
+  }
+
+  function captureLeaderboardDom() {
+    // .mantine-Stack-root and .mantine-Group-root are generic Mantine layout primitives used
+    // all over this page (chat messages, the profile widget, etc. — 60+ of each), so the
+    // podium can only be reliably identified as the one Group whose DIRECT children are
+    // exactly the three podium Stacks (verified live: exactly one such match on this page).
+    const group = [...document.querySelectorAll('.mantine-Group-root')].find(g =>
+      [...g.children].filter(c => c.classList.contains('mantine-Stack-root')).length === 3
+    );
+    const tbody = document.querySelector('.mantine-Table-tbody');
+    if (!group || !tbody || !tbody.firstElementChild) return null;
+    return { group, groupHTML: group.innerHTML, tbody, tbodyHTML: tbody.innerHTML, rowTemplate: tbody.firstElementChild };
+  }
+
+  async function renderCustomLeaderboard() {
+    if (!leaderboardSnapshot) leaderboardSnapshot = captureLeaderboardDom();
+    if (!leaderboardSnapshot) return;
+    if (!CONFIG.LEADERBOARD_API_BASE) {
+      console.warn('[cco-pricedata] LEADERBOARD_API_BASE is not set — nothing to show for Pricedata Value.');
+      return;
+    }
+    const entries = await fetchLeaderboard(50);
+    if (!leaderboardActive) return; // user switched category again while this was in flight
+
+    const { group, tbody, rowTemplate } = leaderboardSnapshot;
+    // Podium DOM order is 2nd/1st/3rd place (tallest stack in the middle) — only the 3 DIRECT
+    // Stack children of this Group are podium slots (see captureLeaderboardDom for why).
+    const stacks = [...group.children].filter(c => c.classList.contains('mantine-Stack-root'));
+    const podiumSlots = [entries[1], entries[0], entries[2]];
+    stacks.forEach((stack, i) => {
+      const entry = podiumSlots[i];
+      const texts = [...stack.querySelectorAll('p.mantine-Text-root')];
+      const avatarImg = stack.querySelector('img.mantine-Avatar-image');
+      if (!entry) { texts.forEach(p => { p.textContent = '—'; }); return; }
+      if (texts[0]) texts[0].textContent = entry.username || 'Unknown';
+      if (texts[1]) texts[1].textContent = Math.round(entry.totalValue).toLocaleString('en-US');
+      if (texts[2]) texts[2].textContent = fmtFull(entry.totalValue);
+      if (avatarImg && entry.avatarUrl) avatarImg.src = entry.avatarUrl;
+    });
+
+    tbody.innerHTML = '';
+    entries.slice(3).forEach((entry, i) => {
+      const tr = rowTemplate.cloneNode(true);
+      const tds = [...tr.querySelectorAll('td')];
+      // Name cell is a Group containing an Avatar img + a name <p> — mutate both in place
+      // instead of wiping the cell, so submitted profile pictures actually show up here.
+      if (tds[0]) tds[0].textContent = '#' + (i + 4);
+      if (tds[1]) {
+        const avatarImg = tds[1].querySelector('img.mantine-Avatar-image');
+        const nameP = tds[1].querySelector('p.mantine-Text-root');
+        if (avatarImg) { if (entry.avatarUrl) avatarImg.src = entry.avatarUrl; else avatarImg.removeAttribute('src'); }
+        if (nameP) nameP.textContent = entry.username || 'Unknown';
+        else tds[1].textContent = entry.username || 'Unknown';
+      }
+      if (tds[3]) tds[3].textContent = Math.round(entry.totalValue).toLocaleString('en-US');
+      if (tds[4]) tds[4].textContent = fmtFull(entry.totalValue);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function hookLeaderboardPage() {
+    if (location.pathname !== '/leaderboard') {
+      leaderboardActive = false;
+      leaderboardSnapshot = null;
+      return;
+    }
+    hookCategoryDropdown();
+  }
+
   // ---------- Tick / scheduling ----------
   let tickTimer = null;
   function scheduleTick() {
@@ -832,16 +1137,24 @@
   }
 
   function tick() {
+    const ctx = currentContext();
     const cards = document.querySelectorAll('.mantine-Card-root');
-    if (cards.length && cards.length !== nativePageSkins.length) primeCurrentPage();
-    hookSortDropdown();
-    applySort();
-    updateCardPrices();
+    // Only the real /inventory and storage-unit list pages have a Sort dropdown our
+    // takeover can actually drive. Elsewhere (e.g. the trade page's "Add skins to trade"
+    // modal, which has its own unrelated "Sort" control) hijacking it just showed a fake
+    // "Pricedata" label that didn't sort anything, and reloaded the whole page on click.
+    if (ctx) {
+      if (cards.length && cards.length !== nativePageSkins.length) primeCurrentPage();
+      hookSortDropdown();
+      applySort();
+      updateCardPrices();
+    }
+    updateExtraCardPrices();
     addCopyBtns();
     renderInlineTotal();
-    const ctx = currentContext();
     if (ctx && ctx.type === 'inv') injectScanButton();
-    getCachedTotals().then(() => { renderInlineTotal(); }).catch(() => {});
+    if (ctx) getCachedTotals().then(() => { renderInlineTotal(); }).catch(() => {});
+    hookLeaderboardPage();
   }
 
   // ---------- Bootstrap ----------
