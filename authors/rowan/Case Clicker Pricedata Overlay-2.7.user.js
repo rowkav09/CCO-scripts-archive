@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      4.2
+// @version      4.3
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -223,6 +223,17 @@
     return typeof name === 'string' && /katowice/i.test(name);
   }
 
+  // Some patterns are correctly flagged as real event drops (skin.event truthy) but their
+  // specific pattern has no EV multiplier documented anywhere in the sheet — e.g. Talon Knife
+  // Fade '100% Fade'/'80% Fade' during Halloween 2025: every other knife pattern in that same
+  // "Fade(Knife)" tab has an EV value (x3), these two rows are just blank. Rather than silently
+  // falling through to no event bonus at all, use explicit fallback base values (pre quality
+  // scaling, same slot as the sheet's own extVal) given directly for these two patterns.
+  const EVENT_EV_FALLBACK_BY_PATTERN_ID = {
+    '65a652a7fdd7ea906a8f8767': 3000000,  // Talon Knife | Fade '100% Fade'
+    '65a652acfdd7ea906a8f8768': 800000,   // Talon Knife | Fade '80% Fade'
+  };
+
   function calcPrice(skin) {
     const native = (typeof skin.price === 'number' ? skin.price : skin.weaponPrice) || 0;
     if (!dataReady) return { calc: native, native, source: 'loading' };
@@ -242,7 +253,11 @@
         // ground truth: a non-event Crimson Web 'Centered Web' Stiletto Knife (BS, quality 2)
         // priced at exactly base*7^quality with NO EV applied ($7.84M) — applying EV
         // unconditionally was tried and contradicted by the bot, so this stays gated.
-        if (skin.event) { const ev = parseAdjustment(row[11]); if (ev && ev.type === 'mult') base *= ev.value; }
+        if (skin.event) {
+          const ev = parseAdjustment(row[11]);
+          if (ev && ev.type === 'mult') base *= ev.value;
+          else if (EVENT_EV_FALLBACK_BY_PATTERN_ID[skin.patternId] != null) base = EVENT_EV_FALLBACK_BY_PATTERN_ID[skin.patternId];
+        }
       }
     }
 
@@ -736,9 +751,19 @@
     }
   }
 
+  // Opens the raw @updateURL in a new tab. Tampermonkey intercepts .user.js URLs itself and,
+  // if a script with the same @namespace/@name is already installed, shows its own "Update"
+  // (rather than "Install") prompt when the remote @version is newer — confirmed live, this
+  // is exactly what happens navigating to raw.githubusercontent.com/.../*.user.js. So this
+  // button is a real manual "check now" trigger, not just a link to the source.
+  function onUpdateButtonClick() {
+    window.open('https://raw.githubusercontent.com/rowkav09/CCO-scripts-archive/main/scripts/Utilities/Case%20Clicker%20Pricedata%20Overlay-2.7.user.js', '_blank');
+  }
+
   // Cloning the existing button row (Float Rank Management / Custom Sell / Storage Units /
-  // Special Effects) and collapsing it to one column keeps identical Mantine classes, so the
-  // new button matches the site's own look exactly without having to hand-reconstruct it.
+  // Special Effects) keeps identical Mantine classes, so our buttons match the site's own
+  // look exactly without having to hand-reconstruct it. Kept at 2 columns (Scan All + Update
+  // Script) instead of collapsing to 1.
   function injectScanButton() {
     if (document.getElementById('cco-scan-row')) return;
     const srcBtn = [...document.querySelectorAll('button')].find(b => /Float Rank Management|Storage Units|Special Effects|Custom Sell/.test(b.textContent));
@@ -751,14 +776,31 @@
     newRow.id = 'cco-scan-row';
     newRow.style.marginTop = '8px';
     const cols = [...newRow.querySelectorAll('.mantine-Grid-col')];
-    cols.forEach((c, i) => { if (i > 0) c.remove(); });
-    cols[0].style.flex = '1 1 100%';
-    cols[0].style.maxWidth = '100%';
-    const btn = cols[0].querySelector('button');
-    btn.removeAttribute('id');
-    btn.style.width = '100%';
-    setButtonLabel(btn, SCAN_BTN_LABEL);
-    btn.addEventListener('click', onScanButtonClick);
+    cols.forEach((c, i) => { if (i > 1) c.remove(); });
+    if (cols[1]) {
+      cols[0].style.flex = '1 1 70%';
+      cols[0].style.maxWidth = '70%';
+      cols[1].style.flex = '1 1 30%';
+      cols[1].style.maxWidth = '30%';
+    } else {
+      cols[0].style.flex = '1 1 100%';
+      cols[0].style.maxWidth = '100%';
+    }
+
+    const scanBtn = cols[0].querySelector('button');
+    scanBtn.removeAttribute('id');
+    scanBtn.style.width = '100%';
+    setButtonLabel(scanBtn, SCAN_BTN_LABEL);
+    scanBtn.addEventListener('click', onScanButtonClick);
+
+    if (cols[1]) {
+      const updateBtn = cols[1].querySelector('button');
+      updateBtn.removeAttribute('id');
+      updateBtn.style.width = '100%';
+      setButtonLabel(updateBtn, 'Update Script');
+      updateBtn.addEventListener('click', onUpdateButtonClick);
+    }
+
     gridRoot.insertAdjacentElement('afterend', newRow);
   }
 
