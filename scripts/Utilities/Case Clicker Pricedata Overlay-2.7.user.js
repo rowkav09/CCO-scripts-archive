@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      4.1
+// @version      4.2
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -1015,21 +1015,20 @@
   // cases / Vault money collected / Money earned / Money spent / ...) is backed by stats the
   // site's own backend computes — it has no concept of our pricedata valuation. We add a
   // "Pricedata Value" entry to that same Category dropdown (same clone-a-real-option pattern
-  // as the inventory Sort dropdown's "Pricedata" entry), but — unlike the first version of
-  // this feature — picking it no longer mutates the site's own podium/table DOM in place.
+  // as the inventory Sort dropdown's "Pricedata" entry). Must look pixel-identical to every
+  // other category — podium (top 3) + table (rest) — so instead of hand-building markup we
+  // reuse the site's own rendered structure.
   //
-  // That approach (still used nowhere in this file anymore) turned out to be broken in a way
-  // that wasn't obvious until live testing: mutating textContent/img.src on the SITE's own
-  // rendered nodes only changes what's visually displayed — it never touches React's actual
-  // component state/props for those nodes. Any interaction React itself still owns (click
-  // handlers on the podium, or just React re-rendering the list on its own later — e.g. a
-  // websocket update) keeps referencing the ORIGINAL entry that was really there, not our
-  // overlay. In practice that showed up as clicking an entry navigating to whichever real
-  // player used to occupy that spot on the LAST real category you viewed, not the player our
-  // overlay was displaying. A separate, fully own-built modal has no such stale references —
-  // every element in it (including each profile link's href) is built fresh from our own
-  // fetched data every time it opens.
+  // Earlier version of this mutated the SITE's own live podium/table nodes in place. That
+  // broke on click: mutating textContent/img.src only changes what's displayed — it never
+  // touches React's actual props for those nodes, so any click handler React still owns kept
+  // referencing whichever real player was there before we overwrote it, navigating to a
+  // stale/wrong profile. Fix: clone the podium Group and the table wholesale (cloneNode does
+  // NOT copy React's internal fiber/prop references or any addEventListener-bound handlers —
+  // only real DOM attributes), hide the live originals, and populate the detached clones
+  // instead. Same exact styling, zero stale bindings.
   let leaderboardActive = false;
+  let leaderboardOverlay = null; // { liveGroup, liveTable, cloneGroup, cloneTable, cloneTbody, rowTemplate }
 
   function findCategorySelectRoot() {
     const label = [...document.querySelectorAll('label')].find(e => e.textContent.trim() === 'Category');
@@ -1060,9 +1059,7 @@
     if (!nativeOptions.length) return;
     if (!dropdown.dataset.ccoNativeHook) {
       dropdown.dataset.ccoNativeHook = '1';
-      // We never touch the site's own leaderboard DOM anymore, so picking a real category
-      // needs nothing more than closing our overlay — no reload required.
-      nativeOptions.forEach(o => o.addEventListener('click', () => { leaderboardActive = false; closeLeaderboardModal(); }));
+      nativeOptions.forEach(o => o.addEventListener('click', () => { leaderboardActive = false; hideCustomLeaderboard(); }));
     }
     let custom = dropdown.querySelector('[data-cco-option]');
     if (!custom) {
@@ -1074,7 +1071,7 @@
       custom.addEventListener('click', (e) => {
         e.stopPropagation();
         leaderboardActive = true;
-        showLeaderboardModal();
+        renderCustomLeaderboard();
       });
       dropdown.appendChild(custom);
     }
@@ -1082,11 +1079,10 @@
     custom.setAttribute('aria-selected', active ? 'true' : 'false');
     if (active) { custom.setAttribute('data-checked', 'true'); custom.setAttribute('data-combobox-active', 'true'); }
     else { custom.removeAttribute('data-checked'); custom.removeAttribute('data-combobox-active'); }
-    // Our option is always appended after every real category, so on a dropdown with this
-    // many entries it sits below the fold. Mantine's own combobox scrolls its actually-active
-    // option into view on open — since it has no idea ours exists, do the same ourselves so
-    // reopening the dropdown while "Pricedata Value" is selected doesn't leave it pinned off
-    // -screen with no indication it's there.
+    // It's appended after every real category, so on a dropdown with this many entries it can
+    // sit below the fold. Mantine's own combobox scrolls the actually-active option into view
+    // on open — since it has no idea ours exists, do the same ourselves so it behaves like
+    // every other option instead of staying pinned off-screen with no indication it's there.
     if (active) custom.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
@@ -1094,72 +1090,103 @@
     if (leaderboardActive && input.value !== 'Pricedata Value') input.value = 'Pricedata Value';
   }
 
-  // ---------- Custom leaderboard modal (fully own-built — see comment above) ----------
-  function lbRankBadge(rank) {
-    if (rank === 1) return '🥇';
-    if (rank === 2) return '🥈';
-    if (rank === 3) return '🥉';
-    return '#' + rank;
+  // Finds the live podium Group + table, clones both, hides the live ones, and inserts the
+  // clones in the exact same spot — so layout/position/styling stay pixel-identical while the
+  // clones themselves carry no React bindings to go stale.
+  function showCustomLeaderboardClone() {
+    hideCustomLeaderboard();
+    // .mantine-Stack-root and .mantine-Group-root are generic Mantine layout primitives used
+    // all over this page (chat messages, the profile widget, etc. — 60+ of each), so the
+    // podium can only be reliably identified as the one Group whose DIRECT children are
+    // exactly the three podium Stacks (verified live: exactly one such match on this page).
+    const group = [...document.querySelectorAll('.mantine-Group-root')].find(g =>
+      [...g.children].filter(c => c.classList.contains('mantine-Stack-root')).length === 3
+    );
+    const tbody = document.querySelector('.mantine-Table-tbody');
+    const table = tbody && tbody.closest('table');
+    if (!group || !tbody || !table || !tbody.firstElementChild) return null;
+
+    const rowTemplate = tbody.firstElementChild.cloneNode(true); // pristine row template, from the live (untouched) table
+    const cloneGroup = group.cloneNode(true);
+    const cloneTable = table.cloneNode(true);
+    const cloneTbody = cloneTable.querySelector('tbody') || cloneTable.querySelector('.mantine-Table-tbody');
+
+    group.insertAdjacentElement('afterend', cloneGroup);
+    group.style.display = 'none';
+    table.insertAdjacentElement('afterend', cloneTable);
+    table.style.display = 'none';
+
+    leaderboardOverlay = { liveGroup: group, liveTable: table, cloneGroup, cloneTable, cloneTbody, rowTemplate };
+    return leaderboardOverlay;
   }
 
-  function lbRowHtml(entry) {
-    const url = entry.avatarUrl ? escapeHtml(entry.avatarUrl) : '';
-    const initial = escapeHtml((entry.username || '?').charAt(0).toUpperCase());
-    // Real case-clicker.com profile URLs are /profile/<userId> (confirmed live via the site's
-    // own nav-bar profile link) — entry.userId is the real case-clicker user id, so this
-    // always points at the correct player, unlike the old DOM-mutation approach.
-    return `
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #333;">
-        <span style="width:28px;text-align:center;font-weight:600;flex-shrink:0;">${lbRankBadge(entry.rank)}</span>
-        <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:#333;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px;">${
-          url ? `<img src="${url}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';this.parentElement.textContent='${initial}';">` : initial
-        }</div>
-        <a href="/profile/${escapeHtml(entry.userId || '')}" target="_blank" rel="noopener" style="flex:1;color:#fff;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(entry.username || 'Unknown')}</a>
-        <span style="color:#f60;font-weight:600;white-space:nowrap;">${fmtFull(entry.totalValue)}</span>
-      </div>`;
+  function hideCustomLeaderboard() {
+    if (!leaderboardOverlay) return;
+    const { liveGroup, liveTable, cloneGroup, cloneTable } = leaderboardOverlay;
+    if (liveGroup) liveGroup.style.display = '';
+    if (liveTable) liveTable.style.display = '';
+    if (cloneGroup && cloneGroup.parentElement) cloneGroup.remove();
+    if (cloneTable && cloneTable.parentElement) cloneTable.remove();
+    leaderboardOverlay = null;
   }
 
-  async function showLeaderboardModal() {
-    const old = document.getElementById('cco-lb-modal');
-    if (old) old.remove();
-    const overlay = document.createElement('div');
-    overlay.id = 'cco-lb-modal';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100000;' +
-      'display:flex;align-items:center;justify-content:center;';
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeLeaderboardModal(); });
+  // Sets an avatar <img>'s src with a plain fallback on load failure — some submitted avatar
+  // URLs (e.g. a Tenor GIF someone set as their case-clicker profile picture) get region/
+  // hotlink-blocked and render as a "Content not viewable in your region" placeholder image
+  // instead of erroring cleanly. This is a site-wide quirk (the native leaderboard shows the
+  // exact same broken image for those users), not something introduced here — but we can at
+  // least fall back to a blank avatar instead of showing that placeholder ourselves.
+  function setAvatarSrc(img, url) {
+    if (!img) return;
+    if (!url) { img.removeAttribute('src'); return; }
+    img.onerror = () => { img.onerror = null; img.removeAttribute('src'); };
+    img.src = url;
+  }
 
-    const panel = document.createElement('div');
-    panel.style.cssText = 'background:#1a1a1e;border:1px solid #f60;border-radius:8px;padding:20px 24px;' +
-      'max-width:480px;width:90%;max-height:80vh;overflow:auto;color:#fff;font-size:14px;font-family:inherit;';
-    panel.innerHTML = '<div style="font-size:18px;font-weight:600;margin-bottom:12px;">Pricedata Value Leaderboard</div>' +
-      '<div id="cco-lb-rows" style="opacity:.6;">Loading…</div>';
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = 'Close';
-    closeBtn.style.cssText = 'margin-top:16px;background:#f60;color:#000;border:none;border-radius:4px;' +
-      'padding:8px 16px;cursor:pointer;font-weight:600;';
-    closeBtn.addEventListener('click', closeLeaderboardModal);
-    panel.appendChild(closeBtn);
-    overlay.appendChild(panel);
-    document.body.appendChild(overlay);
-
+  async function renderCustomLeaderboard() {
+    const overlay = showCustomLeaderboardClone();
+    if (!overlay) return;
     const entries = await fetchLeaderboard(50);
-    if (!leaderboardActive || !document.getElementById('cco-lb-modal')) return; // closed/switched while loading
-    const rowsEl = panel.querySelector('#cco-lb-rows');
-    rowsEl.style.opacity = '1';
-    rowsEl.innerHTML = entries.length
-      ? entries.map(lbRowHtml).join('')
-      : '<div style="opacity:.6;padding:12px 0;">No submissions yet.</div>';
-  }
+    if (!leaderboardActive) return; // user switched category (or left the page) while this was in flight
 
-  function closeLeaderboardModal() {
-    const el = document.getElementById('cco-lb-modal');
-    if (el) el.remove();
+    const { cloneGroup, cloneTbody, rowTemplate } = overlay;
+    // Podium DOM order is 2nd/1st/3rd place (tallest stack in the middle) — only the 3 DIRECT
+    // Stack children of this Group are podium slots (see showCustomLeaderboardClone).
+    const stacks = [...cloneGroup.children].filter(c => c.classList.contains('mantine-Stack-root'));
+    const podiumSlots = [entries[1], entries[0], entries[2]];
+    stacks.forEach((stack, i) => {
+      const entry = podiumSlots[i];
+      const texts = [...stack.querySelectorAll('p.mantine-Text-root')];
+      const avatarImg = stack.querySelector('img.mantine-Avatar-image');
+      if (!entry) { texts.forEach(p => { p.textContent = '—'; }); setAvatarSrc(avatarImg, null); return; }
+      if (texts[0]) texts[0].textContent = entry.username || 'Unknown';
+      if (texts[1]) texts[1].textContent = Math.round(entry.totalValue).toLocaleString('en-US');
+      if (texts[2]) texts[2].textContent = fmtFull(entry.totalValue);
+      setAvatarSrc(avatarImg, entry.avatarUrl);
+    });
+
+    cloneTbody.innerHTML = '';
+    entries.slice(3).forEach((entry, i) => {
+      const tr = rowTemplate.cloneNode(true);
+      const tds = [...tr.querySelectorAll('td')];
+      if (tds[0]) tds[0].textContent = '#' + (i + 4);
+      if (tds[1]) {
+        const avatarImg = tds[1].querySelector('img.mantine-Avatar-image');
+        const nameP = tds[1].querySelector('p.mantine-Text-root');
+        setAvatarSrc(avatarImg, entry.avatarUrl);
+        if (nameP) nameP.textContent = entry.username || 'Unknown';
+        else tds[1].textContent = entry.username || 'Unknown';
+      }
+      if (tds[3]) tds[3].textContent = Math.round(entry.totalValue).toLocaleString('en-US');
+      if (tds[4]) tds[4].textContent = fmtFull(entry.totalValue);
+      cloneTbody.appendChild(tr);
+    });
   }
 
   function hookLeaderboardPage() {
     if (location.pathname !== '/leaderboard') {
       leaderboardActive = false;
-      closeLeaderboardModal();
+      hideCustomLeaderboard();
       return;
     }
     hookCategoryDropdown();
