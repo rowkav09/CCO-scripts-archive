@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      3.9
+// @version      4.0
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), and a copy-link button on trade/chat/other-SU cards.
@@ -43,7 +43,7 @@
     // Fill this in once you've deployed the Vercel API (see the two files provided alongside
     // this script: api/submit-score.js and api/leaderboard.js). Leave blank to disable the
     // leaderboard feature entirely (no submissions, no custom category on /leaderboard).
-    LEADERBOARD_API_BASE: '', // e.g. 'https://your-project.vercel.app'
+    LEADERBOARD_API_BASE: 'https://cco-leaderboard-api.vercel.app',
   };
 
   const EXT_COL = { 'Factory New': 4, 'Minimal Wear': 5, 'Field-Tested': 6, 'Well-Worn': 7, 'Battle-Scarred': 8 };
