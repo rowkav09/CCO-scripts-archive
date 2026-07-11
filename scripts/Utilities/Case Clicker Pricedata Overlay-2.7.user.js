@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.4
+// @version      5.5
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -311,6 +311,47 @@
   function fmtFull(n) {
     if (n == null || isNaN(n)) return '$0.00';
     return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // ---------- Display rounding (Pricedata Scan menu only) ----------
+  // Persisted display preference for the scan menu's own numbers — Full (exact, with cents),
+  // Rounded (nearest whole dollar), or abbreviated to 2/3 significant figures (e.g. $1.8M /
+  // $1.82M). Doesn't touch card badges or the leaderboard — this only affects the menu.
+  function getNumberFormat() {
+    const v = localStorage.getItem('cco_numberFormat');
+    return (v === 'rounded' || v === '2sf' || v === '3sf') ? v : 'full';
+  }
+  function setNumberFormat(mode) { localStorage.setItem('cco_numberFormat', mode); }
+
+  // Formats n to the given number of significant figures, abbreviating with a K/M/B/T suffix
+  // once the magnitude warrants one (mirrors how the site itself shows big numbers, e.g. the
+  // header's "$47.103M").
+  function toSigFigString(n, sigFigs) {
+    if (n === 0) return '0';
+    const neg = n < 0;
+    const abs = Math.abs(n);
+    const SUFFIXES = [{ v: 1e12, s: 'T' }, { v: 1e9, s: 'B' }, { v: 1e6, s: 'M' }, { v: 1e3, s: 'K' }];
+    const suf = SUFFIXES.find(x => abs >= x.v);
+    let str;
+    if (!suf) {
+      const mag = Math.floor(Math.log10(abs));
+      const decimals = Math.max(0, sigFigs - 1 - mag);
+      str = abs.toFixed(decimals);
+    } else {
+      const scaled = abs / suf.v;
+      const mag = Math.floor(Math.log10(scaled));
+      const decimals = Math.max(0, sigFigs - 1 - mag);
+      str = scaled.toFixed(decimals) + suf.s;
+    }
+    return (neg ? '-' : '') + str;
+  }
+
+  function fmtByMode(n, mode) {
+    if (n == null || isNaN(n)) return '$0.00';
+    if (mode === 'rounded') return '$' + Math.round(n).toLocaleString('en-US');
+    if (mode === '2sf') return '$' + toSigFigString(n, 2);
+    if (mode === '3sf') return '$' + toSigFigString(n, 3);
+    return fmtFull(n);
   }
 
   // ---------- Tooltip ----------
@@ -744,12 +785,15 @@
     }
   }
 
-  function fmtCachedValue(key) {
+  function cachedRawValue(key) {
     const persisted = loadPersistedTotals(key);
-    return persisted ? fmtFull(persisted.calc) : 'Not scanned yet';
+    return persisted ? persisted.calc : null;
   }
 
-  function buildScanMenuRow(label, valueText, onClick) {
+  // rawValue is a number (formatted per the current display-format setting, and reformatted
+  // in place whenever that setting changes — see reformatScanMenuValues) or null (nothing
+  // scanned yet, shown as plain text with nothing to reformat).
+  function buildScanMenuRow(label, rawValue, onClick) {
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;' +
       'padding:7px 2px;border-bottom:1px solid #333;font-size:13px;';
@@ -764,10 +808,27 @@
     nameSpan.textContent = label;
     const valueSpan = document.createElement('span');
     valueSpan.style.cssText = 'color:#f60;white-space:nowrap;flex-shrink:0;';
-    valueSpan.textContent = valueText;
+    if (rawValue == null) {
+      valueSpan.textContent = 'Not scanned yet';
+    } else {
+      valueSpan.dataset.rawValue = String(rawValue);
+      valueSpan.textContent = fmtByMode(rawValue, getNumberFormat());
+    }
     row.appendChild(nameSpan);
     row.appendChild(valueSpan);
     return row;
+  }
+
+  // Re-renders every value currently shown in the menu using whatever display-format is
+  // selected right now — called once when the format buttons are toggled, so switching
+  // Full/Rounded/2SF/3SF doesn't require a re-scan or reopening the menu.
+  function reformatScanMenuValues() {
+    if (!scanMenuEl) return;
+    const mode = getNumberFormat();
+    scanMenuEl.querySelectorAll('[data-raw-value]').forEach(el => {
+      const raw = parseFloat(el.dataset.rawValue);
+      if (!isNaN(raw)) el.textContent = fmtByMode(raw, mode);
+    });
   }
 
   // (Re)populates the storage-unit list from whatever's cached locally right now — called on
@@ -785,7 +846,7 @@
       return;
     }
     sus.forEach(su => {
-      const row = buildScanMenuRow(su.name || '(unnamed)', fmtCachedValue('su:' + su._id), () => {
+      const row = buildScanMenuRow(su.name || '(unnamed)', cachedRawValue('su:' + su._id), () => {
         window.location.href = '/inventory/storageUnits/' + su._id;
       });
       listEl.appendChild(row);
@@ -808,8 +869,37 @@
     title.textContent = 'Pricedata Scan';
     panel.appendChild(title);
 
+    // Display-format toggle (Full / Rounded / 2SF / 3SF) — affects every value shown in this
+    // menu only (card badges and the leaderboard are unaffected), persisted across opens.
+    const formatRow = document.createElement('div');
+    formatRow.style.cssText = 'display:flex;gap:6px;margin-bottom:10px;';
+    const FORMAT_OPTIONS = [['full', 'Full'], ['rounded', 'Rounded'], ['2sf', '2SF'], ['3sf', '3SF']];
+    function paintFormatButtons() {
+      const current = getNumberFormat();
+      [...formatRow.children].forEach(b => {
+        const active = b.dataset.formatMode === current;
+        b.style.background = active ? '#f60' : 'transparent';
+        b.style.color = active ? '#000' : '#f60';
+      });
+    }
+    FORMAT_OPTIONS.forEach(([mode, label]) => {
+      const fBtn = document.createElement('button');
+      fBtn.textContent = label;
+      fBtn.dataset.formatMode = mode;
+      fBtn.style.cssText = 'flex:1;padding:5px 0;font-size:11px;font-weight:600;border-radius:4px;' +
+        'cursor:pointer;border:1px solid #f60;background:transparent;color:#f60;';
+      fBtn.addEventListener('click', () => {
+        setNumberFormat(mode);
+        paintFormatButtons();
+        reformatScanMenuValues();
+      });
+      formatRow.appendChild(fBtn);
+    });
+    paintFormatButtons();
+    panel.appendChild(formatRow);
+
     // Cached (last-scanned) inventory total, shown instantly — no fetch needed to open this.
-    const invRow = buildScanMenuRow('Inventory', fmtCachedValue('inv'));
+    const invRow = buildScanMenuRow('Inventory', cachedRawValue('inv'));
     invRow.style.fontWeight = '600';
     invRow.style.borderBottom = '1px solid #444';
     panel.appendChild(invRow);
@@ -884,13 +974,15 @@
       scanBtn.disabled = true;
       try {
         const results = await scanAll((msg) => { statusEl.textContent = msg; });
-        invRow.querySelector('span:last-child').textContent = fmtFull(results.inv.calc);
+        const invValSpan = invRow.querySelector('span:last-child');
+        invValSpan.dataset.rawValue = String(results.inv.calc);
+        invValSpan.textContent = fmtByMode(results.inv.calc, getNumberFormat());
         await refreshScanMenuStorageUnits();
-        statusEl.textContent = `Done — grand total ${fmtFull(results.grandCalc)}`;
+        statusEl.textContent = `Done — grand total ${fmtByMode(results.grandCalc, getNumberFormat())}`;
         if (lbSubmitEnabled()) {
           statusEl.textContent += ' — submitting to leaderboard…';
           await submitToLeaderboard(results.grandCalc, results.grandNative, results.premier);
-          statusEl.textContent = `Done — grand total ${fmtFull(results.grandCalc)} (submitted ✓)`;
+          statusEl.textContent = `Done — grand total ${fmtByMode(results.grandCalc, getNumberFormat())} (submitted ✓)`;
         }
       } catch (err) {
         console.error('[cco-pricedata] scan failed', err);
@@ -1215,89 +1307,89 @@
     }
   }
 
-  // ---------- /leaderboard page: custom "Pricedata Value" category ----------
-  // The site's own leaderboard (Category select: XP / Premier rating / Clicks / Clicked
-  // cases / Vault money collected / Money earned / Money spent / ...) is backed by stats the
-  // site's own backend computes — it has no concept of our pricedata valuation. We add a
-  // "Pricedata Value" entry to that same Category dropdown (same clone-a-real-option pattern
-  // as the inventory Sort dropdown's "Pricedata" entry). Must look pixel-identical to every
-  // other category — podium (top 3) + table (rest) — so instead of hand-building markup we
-  // reuse the site's own rendered structure.
+  // ---------- /leaderboard page: Pricedata leaderboard as its own separate link ----------
+  // Per explicit instruction, this is no longer folded into the native Category dropdown as
+  // an extra option — instead there's a button on /leaderboard that navigates to a distinct
+  // URL (a #pricedata hash on the same page, so it's a real bookmarkable/shareable link and
+  // the browser back button works) which shows a copy of the SAME podium+table format the
+  // native leaderboard uses, just backed by our own data.
   //
-  // Earlier version of this mutated the SITE's own live podium/table nodes in place. That
-  // broke on click: mutating textContent/img.src only changes what's displayed — it never
-  // touches React's actual props for those nodes, so any click handler React still owns kept
+  // Earlier version mutated the SITE's own live podium/table nodes in place. That broke on
+  // click: mutating textContent/img.src only changes what's displayed — it never touches
+  // React's actual props for those nodes, so any click handler React still owns kept
   // referencing whichever real player was there before we overwrote it, navigating to a
   // stale/wrong profile. Fix: clone the podium Group and the table wholesale (cloneNode does
   // NOT copy React's internal fiber/prop references or any addEventListener-bound handlers —
-  // only real DOM attributes), hide the live originals, and populate the detached clones
-  // instead. Same exact styling, zero stale bindings.
+  // only real DOM attributes), hide the live originals (and the Category select itself, while
+  // our view is up, so changing it can't leave stale content showing), and populate the
+  // detached clones instead. Same exact styling, zero stale bindings.
+  const PRICEDATA_LEADERBOARD_HASH = '#pricedata';
   let leaderboardActive = false;
-  let leaderboardOverlay = null; // { liveGroup, liveTable, cloneGroup, cloneTable, cloneTbody, rowTemplate }
+  let leaderboardOverlay = null; // { liveGroup, liveTable, cloneGroup, cloneTable, cloneTbody, rowTemplate, categoryRoot }
+  let leaderboardToolbarEl = null;
 
   function findCategorySelectRoot() {
     const label = [...document.querySelectorAll('label')].find(e => e.textContent.trim() === 'Category');
     return label ? label.closest('.mantine-Select-root') : null;
   }
 
-  function hookCategoryDropdown() {
-    const root = findCategorySelectRoot();
-    if (!root) return;
-    const input = root.querySelector('input');
-    if (!input || input.dataset.ccoHooked) { if (input) refreshCategoryInputLabel(input); return; }
-    input.dataset.ccoHooked = '1';
-    input.addEventListener('mousedown', () => {
-      setTimeout(injectLeaderboardOption, 30);
-      setTimeout(injectLeaderboardOption, 150);
-    });
-    refreshCategoryInputLabel(input);
+  // A single persistent bar inserted right after the native Category select — shows a
+  // "Pricedata Value Leaderboard" button when browsing the native leaderboard, or a "Back to
+  // Leaderboard" button + title once you've followed it to the #pricedata link.
+  function ensureLeaderboardToolbar(categoryRoot) {
+    if (leaderboardToolbarEl && leaderboardToolbarEl.isConnected) return leaderboardToolbarEl;
+    const bar = document.createElement('div');
+    bar.id = 'cco-leaderboard-toolbar';
+    bar.style.cssText = 'display:flex;align-items:center;gap:10px;margin:10px 0;';
+    categoryRoot.insertAdjacentElement('afterend', bar);
+    leaderboardToolbarEl = bar;
+    return bar;
   }
 
-  function injectLeaderboardOption() {
-    const root = findCategorySelectRoot();
-    if (!root) return;
-    const input = root.querySelector('input');
-    const dropdownId = input && input.getAttribute('aria-controls');
-    const dropdown = dropdownId && document.getElementById(dropdownId);
-    if (!dropdown) return;
-    const nativeOptions = [...dropdown.querySelectorAll('[role="option"]')].filter(o => !o.dataset.ccoOption);
-    if (!nativeOptions.length) return;
-    if (!dropdown.dataset.ccoNativeHook) {
-      dropdown.dataset.ccoNativeHook = '1';
-      nativeOptions.forEach(o => o.addEventListener('click', () => { leaderboardActive = false; hideCustomLeaderboard(); }));
+  function renderLeaderboardToolbar() {
+    const categoryRoot = findCategorySelectRoot();
+    if (!categoryRoot) return;
+    const bar = ensureLeaderboardToolbar(categoryRoot);
+    bar.innerHTML = '';
+    if (leaderboardActive) {
+      const backBtn = document.createElement('button');
+      backBtn.textContent = '← Back to Leaderboard';
+      backBtn.style.cssText = 'background:transparent;color:#f60;border:1px solid #f60;border-radius:4px;' +
+        'padding:6px 12px;cursor:pointer;font-size:13px;font-weight:600;';
+      backBtn.addEventListener('click', () => { location.hash = ''; exitPricedataLeaderboard(); });
+      const title = document.createElement('div');
+      title.textContent = 'Pricedata Value Leaderboard';
+      title.style.cssText = 'font-weight:600;font-size:14px;';
+      bar.appendChild(backBtn);
+      bar.appendChild(title);
+    } else {
+      const btn = document.createElement('button');
+      btn.textContent = 'Pricedata Value Leaderboard →';
+      btn.style.cssText = 'background:#f60;color:#000;border:none;border-radius:4px;' +
+        'padding:6px 12px;cursor:pointer;font-size:13px;font-weight:600;';
+      btn.addEventListener('click', () => { location.hash = PRICEDATA_LEADERBOARD_HASH.slice(1); enterPricedataLeaderboard(); });
+      bar.appendChild(btn);
     }
-    let custom = dropdown.querySelector('[data-cco-option]');
-    if (!custom) {
-      custom = nativeOptions[0].cloneNode(true);
-      custom.dataset.ccoOption = '1';
-      custom.removeAttribute('data-combobox-option');
-      custom.removeAttribute('id');
-      custom.textContent = 'Pricedata Value';
-      custom.addEventListener('click', (e) => {
-        e.stopPropagation();
-        leaderboardActive = true;
-        renderCustomLeaderboard();
-      });
-      dropdown.appendChild(custom);
-    }
-    const active = leaderboardActive;
-    custom.setAttribute('aria-selected', active ? 'true' : 'false');
-    if (active) { custom.setAttribute('data-checked', 'true'); custom.setAttribute('data-combobox-active', 'true'); }
-    else { custom.removeAttribute('data-checked'); custom.removeAttribute('data-combobox-active'); }
-    // It's appended after every real category, so on a dropdown with this many entries it can
-    // sit below the fold. Mantine's own combobox scrolls the actually-active option into view
-    // on open — since it has no idea ours exists, do the same ourselves so it behaves like
-    // every other option instead of staying pinned off-screen with no indication it's there.
-    if (active) custom.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  function refreshCategoryInputLabel(input) {
-    if (leaderboardActive && input.value !== 'Pricedata Value') input.value = 'Pricedata Value';
+  function enterPricedataLeaderboard() {
+    if (leaderboardActive) return;
+    leaderboardActive = true;
+    renderLeaderboardToolbar();
+    renderCustomLeaderboard();
   }
 
-  // Finds the live podium Group + table, clones both, hides the live ones, and inserts the
-  // clones in the exact same spot — so layout/position/styling stay pixel-identical while the
-  // clones themselves carry no React bindings to go stale.
+  function exitPricedataLeaderboard() {
+    if (!leaderboardActive) return;
+    leaderboardActive = false;
+    hideCustomLeaderboard();
+    renderLeaderboardToolbar();
+  }
+
+  // Finds the live podium Group + table, clones both, hides the live ones (plus the Category
+  // select, so it can't be changed to show stale content underneath), and inserts the clones
+  // in the exact same spot — so layout/position/styling stay pixel-identical while the clones
+  // themselves carry no React bindings to go stale.
   function showCustomLeaderboardClone() {
     hideCustomLeaderboard();
     // .mantine-Stack-root and .mantine-Group-root are generic Mantine layout primitives used
@@ -1321,15 +1413,19 @@
     table.insertAdjacentElement('afterend', cloneTable);
     table.style.display = 'none';
 
-    leaderboardOverlay = { liveGroup: group, liveTable: table, cloneGroup, cloneTable, cloneTbody, rowTemplate };
+    const categoryRoot = findCategorySelectRoot();
+    if (categoryRoot) categoryRoot.style.display = 'none';
+
+    leaderboardOverlay = { liveGroup: group, liveTable: table, cloneGroup, cloneTable, cloneTbody, rowTemplate, categoryRoot };
     return leaderboardOverlay;
   }
 
   function hideCustomLeaderboard() {
     if (!leaderboardOverlay) return;
-    const { liveGroup, liveTable, cloneGroup, cloneTable } = leaderboardOverlay;
+    const { liveGroup, liveTable, cloneGroup, cloneTable, categoryRoot } = leaderboardOverlay;
     if (liveGroup) liveGroup.style.display = '';
     if (liveTable) liveTable.style.display = '';
+    if (categoryRoot) categoryRoot.style.display = '';
     if (cloneGroup && cloneGroup.parentElement) cloneGroup.remove();
     if (cloneTable && cloneTable.parentElement) cloneTable.remove();
     leaderboardOverlay = null;
@@ -1405,11 +1501,78 @@
 
   function hookLeaderboardPage() {
     if (location.pathname !== '/leaderboard') {
-      leaderboardActive = false;
-      hideCustomLeaderboard();
+      if (leaderboardActive) { leaderboardActive = false; hideCustomLeaderboard(); }
       return;
     }
-    hookCategoryDropdown();
+    renderLeaderboardToolbar();
+    const wantPricedata = location.hash === PRICEDATA_LEADERBOARD_HASH;
+    if (wantPricedata && !leaderboardActive) enterPricedataLeaderboard();
+    else if (!wantPricedata && leaderboardActive) exitPricedataLeaderboard();
+  }
+
+  // ---------- Bulk include/exclude (Select All / Deselect All) ----------
+  // Sits directly below the native Search box on storage-unit pages (Search lives alone in
+  // its own single-column Grid row there, an easy anchor to insert after). Operates on every
+  // item in the WHOLE unit — fetches every page via fetchAllSkins rather than just the
+  // current page — since that's the same "one unit" scanAll/triggerTotalsCalculation already
+  // treat as a single total; a per-page-only toggle would silently leave other pages' items
+  // in whatever state they were already in.
+  async function setAllIncluded(ctx, included) {
+    const skins = await fetchAllSkins(ctx);
+    skins.forEach(s => { if (s && s._id) { if (included) excludedIds.delete(s._id); else excludedIds.add(s._id); } });
+    totalsCache.clear();
+    scheduleTick();
+  }
+
+  function findSearchGridRoot() {
+    const input = [...document.querySelectorAll('input')].find(i => i.placeholder === 'Search');
+    return input ? input.closest('.mantine-Grid-root') : null;
+  }
+
+  function injectBulkIncludeToggle() {
+    const ctx = currentContext();
+    if (!ctx || ctx.type !== 'su') {
+      const old = document.getElementById('cco-bulk-include-row');
+      if (old) old.remove();
+      return;
+    }
+    if (document.getElementById('cco-bulk-include-row')) return;
+    const searchRoot = findSearchGridRoot();
+    if (!searchRoot) return;
+
+    const row = document.createElement('div');
+    row.id = 'cco-bulk-include-row';
+    row.style.cssText = 'display:flex;gap:8px;margin:8px 0;';
+
+    function makeBtn(label) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText = 'background:transparent;color:#f60;border:1px solid #f60;border-radius:4px;' +
+        'padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;';
+      return b;
+    }
+    const selectAllBtn = makeBtn('Select All');
+    const deselectAllBtn = makeBtn('Deselect All');
+
+    async function run(btn, included) {
+      selectAllBtn.disabled = true;
+      deselectAllBtn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = included ? 'Selecting…' : 'Deselecting…';
+      try {
+        await setAllIncluded(ctx, included);
+      } finally {
+        btn.textContent = original;
+        selectAllBtn.disabled = false;
+        deselectAllBtn.disabled = false;
+      }
+    }
+    selectAllBtn.addEventListener('click', () => run(selectAllBtn, true));
+    deselectAllBtn.addEventListener('click', () => run(deselectAllBtn, false));
+
+    row.appendChild(selectAllBtn);
+    row.appendChild(deselectAllBtn);
+    searchRoot.insertAdjacentElement('afterend', row);
   }
 
   // ---------- Tick / scheduling ----------
@@ -1421,6 +1584,10 @@
       tick();
     }, 50);
   }
+  // The leaderboard's #pricedata hash route needs to react to browser back/forward too, not
+  // just clicks on our own buttons — hashchange doesn't touch the DOM so the MutationObserver
+  // driving scheduleTick() elsewhere would never see it otherwise.
+  window.addEventListener('hashchange', scheduleTick);
 
   // Auto-scan once per storage-unit visit. Inventory intentionally stays click-only (per
   // explicit prior instruction — inventories can be large and this is what caused the
@@ -1460,6 +1627,7 @@
     renderInlineTotal();
     if (ctx && ctx.type === 'inv') injectScanButton();
     if (ctx && ctx.type === 'su') autoScanStorageUnitIfNeeded(ctx);
+    injectBulkIncludeToggle(); // no-ops (and cleans up) when not on a storage-unit page
     hookLeaderboardPage();
   }
 
