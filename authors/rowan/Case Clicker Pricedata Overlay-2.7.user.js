@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.3
+// @version      5.4
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -292,7 +292,18 @@
 
     // Final unconditional overrides, applied regardless of branch above.
     if (typeof skin.name === 'string' && skin.name.includes('Terminal')) { price = 25000; source = 'terminal-flat'; }
-    if (typeof skin.name === 'string' && skin.name.includes('(Holo) | Katowice 2014')) { price = skinPrice * 3; source = 'katowice-3x'; }
+
+    // Unapplied/standalone Katowice 2014 holo stickers aren't real skins — no patternId, no
+    // per-pattern sheet row — so they'd otherwise fall through to raw native price. Priced
+    // instead at 3x their own quality-scaled ("QS") base: weaponPrice*7^quality if this copy
+    // carries a quality tier, otherwise just its own price as-is (quality 0 is the norm for a
+    // standalone sticker item, so this is usually just skinPrice*3).
+    if (typeof skin.name === 'string' && skin.name.includes('(Holo) | Katowice 2014')) {
+      const kQuality = typeof skin.quality === 'number' ? skin.quality : 0;
+      const qsBase = kQuality > 0 ? weaponPrice * Math.pow(CONFIG.QUALITY_BASE, kQuality) : skinPrice;
+      price = qsBase * 3;
+      source = 'katowice-3x';
+    }
 
     return { calc: price, native, source };
   }
@@ -1411,6 +1422,23 @@
     }, 50);
   }
 
+  // Auto-scan once per storage-unit visit. Inventory intentionally stays click-only (per
+  // explicit prior instruction — inventories can be large and this is what caused the
+  // rate-limit problems this whole cache system was built to fix), but storage units are
+  // opened one at a time and a single SU's scan is a much smaller, already-throttled request
+  // burst (see fetchAllSkins' FETCH_DELAY_MS), so it's safe to fire automatically on open
+  // rather than making every SU visit start with a manual click. Keyed by su id so navigating
+  // between different storage units re-triggers, but repeat ticks on the SAME one don't.
+  let autoScannedSuKey = null;
+  function autoScanStorageUnitIfNeeded(ctx) {
+    const key = 'su:' + ctx.id;
+    if (autoScannedSuKey === key) return;
+    autoScannedSuKey = key;
+    const cached = getCachedTotals();
+    if (cached && !cached.pending) return; // already fresh (in-memory or a recent localStorage cache) — no refetch needed
+    triggerTotalsCalculation();
+  }
+
   function tick() {
     const ctx = currentContext();
     const cards = document.querySelectorAll('.mantine-Card-root');
@@ -1431,6 +1459,7 @@
     // yet. The actual scan (fetchAllSkins) only runs from that click now, not from every tick.
     renderInlineTotal();
     if (ctx && ctx.type === 'inv') injectScanButton();
+    if (ctx && ctx.type === 'su') autoScanStorageUnitIfNeeded(ctx);
     hookLeaderboardPage();
   }
 
