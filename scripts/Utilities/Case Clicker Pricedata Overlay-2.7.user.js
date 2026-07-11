@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.7
+// @version      5.8
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -26,6 +26,9 @@
     // A pattern missing from List falls back to native/QS pricing in calcPrice() instead of
     // a sheet price.
     REFRESH_MS: 5 * 60 * 1000,
+    // Cap for the refresh backoff (see scheduleSheetRefresh) — a rate-limited IP shouldn't keep
+    // getting hit at the normal REFRESH_MS cadence, but also shouldn't wait forever once it clears.
+    MAX_REFRESH_MS: 30 * 60 * 1000,
     CACHE_MS: 60 * 1000,
     // Persisted (localStorage) cache for the inline total — survives navigation, unlike
     // totalsCache/globalSortedCache (in-memory only). Long TTL is fine since totals only
@@ -48,6 +51,7 @@
   let priceDataByName = new Map();
   let listByPatternId = new Map();
   let dataReady = false;
+  let sheetLoadFailures = 0; // consecutive failed loadData() calls — drives the backoff below
 
   let sortMode = localStorage.getItem('cco_sortMode') === 'pricedata' ? 'pricedata' : 'native';
   let nativePageSkins = [];   // last skins array actually fetched for the visible page, in server order
@@ -120,6 +124,42 @@
     return null;
   }
 
+  // ---------- Sheet data local cache + refresh scheduling ----------
+  // Google's anonymous CSV export endpoints (gviz/tq, and the List tab's publish-to-web link)
+  // have an undocumented per-IP rate limit. A tab left open indefinitely (e.g. AFK farming)
+  // re-fetching both sheets every REFRESH_MS forever, with no idle/backoff behavior, can trip
+  // that limit after enough time — and the resulting block can last a while. Persisting the
+  // last successful parse means pricing keeps working off stale-but-recent data through an
+  // outage instead of failing outright.
+  const SHEET_CACHE_KEY = 'cco_sheetData';
+  function loadPersistedSheetData() {
+    try {
+      const raw = localStorage.getItem(SHEET_CACHE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || !Array.isArray(obj.priceEntries) || !Array.isArray(obj.listEntries) || typeof obj.ts !== 'number') return null;
+      return obj;
+    } catch (e) { return null; }
+  }
+  function savePersistedSheetData(priceMap, listMap) {
+    try {
+      localStorage.setItem(SHEET_CACHE_KEY, JSON.stringify({
+        priceEntries: [...priceMap.entries()],
+        listEntries: [...listMap.entries()],
+        ts: Date.now(),
+      }));
+    } catch (e) { /* storage full/blocked — cache is best-effort */ }
+  }
+  // Runs once at bootstrap, before the first network fetch resolves, so calcPrice() has real
+  // (if possibly stale) sheet data immediately, and keeps using it if every later fetch fails.
+  function hydrateSheetDataFromCache() {
+    const cached = loadPersistedSheetData();
+    if (!cached) return;
+    priceDataByName = new Map(cached.priceEntries);
+    listByPatternId = new Map(cached.listEntries);
+    dataReady = true;
+  }
+
   async function loadData() {
     try {
       const [pdText, listText] = await Promise.all([
@@ -148,14 +188,47 @@
       priceDataByName = newPriceMap;
       listByPatternId = newListMap;
       dataReady = true;
+      sheetLoadFailures = 0;
       globalSortedCache.clear();
       totalsCache.clear();
+      savePersistedSheetData(newPriceMap, newListMap);
       console.log('[cco-pricedata] loaded', newPriceMap.size, 'PriceData rows,', newListMap.size, 'pattern rows (List only)');
       scheduleTick();
     } catch (e) {
       console.error('[cco-pricedata] failed to load sheet data', e);
+      sheetLoadFailures++;
+      // priceDataByName/listByPatternId/dataReady are left untouched — whatever we already had
+      // (fresh, or hydrated from localStorage) keeps working instead of being wiped by this.
     }
   }
+
+  // Pauses while the tab is hidden (no point polling a backgrounded/minimized tab), catches up
+  // once — not in a burst — when it becomes visible again if the cached data is actually stale,
+  // and backs off (capped at MAX_REFRESH_MS) on consecutive failures instead of retrying a
+  // rate-limited endpoint at the same fixed cadence forever.
+  let sheetRefreshTimer = null;
+  function nextRefreshDelay() {
+    if (!sheetLoadFailures) return CONFIG.REFRESH_MS;
+    return Math.min(CONFIG.REFRESH_MS * Math.pow(2, sheetLoadFailures), CONFIG.MAX_REFRESH_MS);
+  }
+  function scheduleSheetRefresh() {
+    if (sheetRefreshTimer) { clearTimeout(sheetRefreshTimer); sheetRefreshTimer = null; }
+    if (document.hidden) return;
+    sheetRefreshTimer = setTimeout(async () => {
+      sheetRefreshTimer = null;
+      await loadData();
+      scheduleSheetRefresh();
+    }, nextRefreshDelay());
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (sheetRefreshTimer) { clearTimeout(sheetRefreshTimer); sheetRefreshTimer = null; }
+      return;
+    }
+    const cached = loadPersistedSheetData();
+    if (!cached || Date.now() - cached.ts >= CONFIG.REFRESH_MS) loadData();
+    scheduleSheetRefresh();
+  });
 
   // ---------- Pricing ----------
   // Mirrors the reference bot's calculateSkinPrice(): the 1/1 bonus applies before ST/SV/EV
@@ -1573,8 +1646,9 @@
       scheduleTick();
     });
     observer.observe(observeRoot, { childList: true, subtree: true });
+    hydrateSheetDataFromCache();
     loadData();
-    setInterval(loadData, CONFIG.REFRESH_MS);
+    scheduleSheetRefresh();
     primeCurrentPage();
     scheduleTick();
   }
