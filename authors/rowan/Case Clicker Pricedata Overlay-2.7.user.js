@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.1
+// @version      5.2
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -176,24 +176,24 @@
   }
 
   // ---------- Pricing ----------
-  function stripPatternFromName(name) {
-    return name.replace(/\s*'[^']+'\s*/, ' ').replace(/\s+/g, ' ').trim();
-  }
-
-  // Katowice 2014 sticker holos aren't covered by any sheet (no patternId, and the
-  // PriceData catalog has zero "Sticker" rows) — per explicit instruction, a standalone/
-  // unapplied Katowice sticker item is worth 3x its native price. Once applied to a skin,
-  // it's left at native/base value (see stickerVal below) — only the unapplied case gets 3x.
-  function isKatowiceSticker(name) {
-    return typeof name === 'string' && /katowice/i.test(name);
-  }
+  // Rewritten to mirror the reference bot's calculateSkinPrice() line-for-line (given verbatim):
+  // ordering matters — the 1/1 bonus applies BEFORE ST/SV/EV (so those stack on top of it, not
+  // the other way around), ST/SV/EV/quality all run unconditionally off whatever `price`
+  // currently holds (no gating on whether a sheet wear-price was actually found), quality
+  // scaling resets to the bare skin.weaponPrice when no wear price was found (discarding
+  // whatever the initial skin.price carried), and the sticker contribution is restored at the
+  // very end as (skin.price - skin.weaponPrice) rather than resummed from skin.stickers[].
+  // priceDataByName (flat name -> price, from the PriceData tab) is still fetched/parsed above
+  // but intentionally no longer consulted here — the reference's non-pattern branch has no
+  // equivalent flat lookup at all, so this now matches it exactly rather than overriding with
+  // an extra data source it never asked for.
 
   // Some patterns are correctly flagged as real event drops (skin.event truthy) but their
   // specific pattern has no EV multiplier documented anywhere in the sheet — e.g. Talon Knife
   // Fade '100% Fade'/'80% Fade' during Halloween 2025: every other knife pattern in that same
   // "Fade(Knife)" tab has an EV value (x3), these two rows are just blank. Rather than silently
   // falling through to no event bonus at all, use explicit fallback base values (pre quality
-  // scaling, same slot as the sheet's own extVal) given directly for these two patterns.
+  // scaling, same slot as the sheet's own wearPrice) given directly for these two patterns.
   const EVENT_EV_FALLBACK_BY_PATTERN_ID = {
     '65a652a7fdd7ea906a8f8767': 3000000,  // Talon Knife | Fade '100% Fade'
     '65a652acfdd7ea906a8f8768': 800000,   // Talon Knife | Fade '80% Fade'
@@ -222,95 +222,79 @@
   function getFloatRanks(skin) {
     return skin.floatRanks ? Object.values(skin.floatRanks) : [];
   }
-  function apply1of1Bonus(skin, calc, ranks, skinGroupValue) {
-    if (skin.hasPattern) {
-      if (ranks[18] === 1 && ranks[19] === 1) {
-        return skinGroupValue === 'Tier' ? 5000000 : Math.max(5000000, calc * 15);
-      }
-      return calc;
-    }
-    if (ranks[6] === 1 && ranks[7] === 1) return calc + 5000000;
-    return calc;
-  }
 
   function calcPrice(skin) {
     const native = (typeof skin.price === 'number' ? skin.price : skin.weaponPrice) || 0;
     if (!dataReady) return { calc: native, native, source: 'loading' };
 
     const ranks = getFloatRanks(skin);
-    let base = null;
-    let skinGroupValue = '';
+    const weaponPrice = typeof skin.weaponPrice === 'number' ? skin.weaponPrice : 0;
+    const skinPrice = typeof skin.price === 'number' ? skin.price : weaponPrice;
+    let price = skinPrice;
+    let source = 'fallback-native';
 
-    if (skin.hasPattern && skin.patternId && listByPatternId.has(skin.patternId)) {
+    if (skin.patternId && listByPatternId.has(skin.patternId)) {
       const row = listByPatternId.get(skin.patternId);
-      skinGroupValue = String(row[3] || '').trim();
+      const skinGroupValue = String(row[3] || '').trim();
       const col = EXT_COL[skin.exterior];
-      let extVal = col != null ? parseMagnitude(row[col]) : null;
-      if (extVal == null) extVal = parseMagnitude(row[2]);
-      if (extVal != null) {
-        base = extVal;
-        // Skin Group "Knife08" (e.g. Nomad Knife | Fade '100% Fade') is a documented exception
-        // straight from the reference bot: its ST column ("ST (MW)" in the sheet) is only ever
-        // populated for the Minimal Wear copy — applying it to Factory New too (as this used to
-        // do) inflated FN StatTrak cards by the MW-only multiplier. Confirmed live: FN ST 100%
-        // Fade Nomad Knife should price the same as the non-ST FN copy, not FN base * ST * EV.
-        const skipStForKnife08FN = skinGroupValue === 'Knife08' && skin.exterior === 'Factory New';
-        if (skin.statTrak) {
-          if (!skipStForKnife08FN) { const adj = parseAdjustment(row[9]); if (adj) base = applyAdjustment(base, adj); }
-        }
-        else if (skin.souvenir) { const adj = parseAdjustment(row[10]); if (adj) base = applyAdjustment(base, adj); }
-        // EV (event) multiplier ONLY applies to actual event skins. Confirmed via /price
-        // ground truth: a non-event Crimson Web 'Centered Web' Stiletto Knife (BS, quality 2)
-        // priced at exactly base*7^quality with NO EV applied ($7.84M) — applying EV
-        // unconditionally was tried and contradicted by the bot, so this stays gated.
-        if (skin.event) {
-          const ev = parseAdjustment(row[11]);
-          if (ev) base = applyAdjustment(base, ev);
-          else if (EVENT_EV_FALLBACK_BY_PATTERN_ID[skin.patternId] != null) base = EVENT_EV_FALLBACK_BY_PATTERN_ID[skin.patternId];
-        }
+      let wearPrice = col != null ? parseMagnitude(row[col]) : null;
+      if (wearPrice == null) wearPrice = parseMagnitude(row[2]);
+      let hasPrice = false;
+      if (wearPrice != null) { price = wearPrice; hasPrice = true; }
+
+      // 1/1 bonus applies first — ST/SV/EV below stack on top of it, per the reference.
+      if (ranks[18] === 1 && ranks[19] === 1) {
+        price = skinGroupValue === 'Tier' ? 5000000 : Math.max(5000000, price * 15);
       }
+
+      // Skin Group "Knife08" (e.g. Nomad Knife | Fade '100% Fade') is a documented exception
+      // straight from the reference bot: its ST column ("ST (MW)" in the sheet) is only ever
+      // populated for the Minimal Wear copy — applying it to Factory New too (as this used to
+      // do) inflated FN StatTrak cards by the MW-only multiplier. Confirmed live: FN ST 100%
+      // Fade Nomad Knife should price the same as the non-ST FN copy, not FN base * ST * EV.
+      const skipStForKnife08FN = skinGroupValue === 'Knife08' && skin.exterior === 'Factory New';
+      if (skin.statTrak) {
+        if (!skipStForKnife08FN) { const adj = parseAdjustment(row[9]); if (adj) price = applyAdjustment(price, adj); }
+      } else if (skin.souvenir) {
+        const adj = parseAdjustment(row[10]); if (adj) price = applyAdjustment(price, adj);
+      }
+
+      // EV (event) multiplier ONLY applies to actual event skins. Confirmed via /price
+      // ground truth: a non-event Crimson Web 'Centered Web' Stiletto Knife (BS, quality 2)
+      // priced at exactly base*7^quality with NO EV applied ($7.84M) — applying EV
+      // unconditionally was tried and contradicted by the bot, so this stays gated.
+      if (skin.event) {
+        const ev = parseAdjustment(row[11]);
+        if (ev) price = applyAdjustment(price, ev);
+        else if (EVENT_EV_FALLBACK_BY_PATTERN_ID[skin.patternId] != null) price = EVENT_EV_FALLBACK_BY_PATTERN_ID[skin.patternId];
+      }
+
+      const quality = typeof skin.quality === 'number' ? skin.quality : 0;
+      if (quality) {
+        // No valid wear price found: reset to the bare weapon price (discarding whatever
+        // `price` held so far) before applying quality scaling — matches the reference exactly.
+        price = hasPrice ? price : weaponPrice;
+        price = price * (quality > 0 ? Math.pow(CONFIG.QUALITY_BASE, quality) : 1);
+      }
+
+      // The sheet price is for the bare weapon — restore whatever sticker value the game itself
+      // already baked into skin.price (skin.price - skin.weaponPrice), since `price` above may
+      // have replaced skin.price entirely with the sheet's own number.
+      if (skinPrice !== weaponPrice) price = price + (skinPrice - weaponPrice);
+
+      source = hasPrice ? 'calculated' : 'calculated-no-wear-price';
+    } else if (!skin.patternId) {
+      // No patternId at all: flat non-pattern 1/1 bonus only, nothing else — matches the
+      // reference's `else` branch exactly. (patternId present but no matching sheet row falls
+      // through here too, per the reference: price stays at raw skin.price, no bonus at all.)
+      if (ranks[6] === 1 && ranks[7] === 1) price += 5000000;
     }
 
-    // The generic PriceData sheet (flat name -> price) holds Steam-market-style prices for
-    // BASE skins with no notable pattern — it is NOT a substitute for per-pattern data. Bug:
-    // this used to run for ANY skin once `base` was still null, including patterned items
-    // whose specific patternId just isn't one we have sheet data for (e.g. the game's own
-    // low/common "Tier 1"-"Tier 5" pattern buckets, which never appear in any pattern tab).
-    // stripPatternFromName() strips the quoted "'Tier 4'" label right back off, so it was
-    // matching the flat base-skin row and overriding the correct native/QS price with an
-    // unrelated Steam market number. Patterned items with no per-pattern sheet match should
-    // fall straight through to native/QS below instead — only NON-patterned items (plain gun
-    // skins, gloves, agents, etc.) are meant to use this flat lookup.
-    if (base == null && !skin.hasPattern) {
-      const cleanName = stripPatternFromName(skin.name || '');
-      if (priceDataByName.has(skin.name)) base = priceDataByName.get(skin.name);
-      else if (priceDataByName.has(cleanName)) base = priceDataByName.get(cleanName);
-    }
+    // Final unconditional overrides, applied regardless of branch above.
+    if (typeof skin.name === 'string' && skin.name.includes('Terminal')) { price = 25000; source = 'terminal-flat'; }
+    if (typeof skin.name === 'string' && skin.name.includes('(Holo) | Katowice 2014')) { price = skinPrice * 3; source = 'katowice-3x'; }
 
-    // No sheet match: native price already includes any applied stickers. A standalone
-    // Katowice sticker item lands here too (no patternId, no PriceData row) — apply the 3x.
-    // "Tier" patterns land here too (their FN/MW cells are literally "QS", so extVal parsing
-    // fails above) — the 1/1 bonus still needs to apply to them, hence the call below rather
-    // than returning straight through un-checked.
-    if (base == null) {
-      const mult = isKatowiceSticker(skin.name) ? 3 : 1;
-      const calc = apply1of1Bonus(skin, native * mult, ranks, skinGroupValue);
-      return { calc, native, source: mult > 1 ? 'katowice-3x' : 'fallback-native' };
-    }
-
-    const quality = typeof skin.quality === 'number' ? skin.quality : 0;
-    base *= Math.pow(CONFIG.QUALITY_BASE, quality);
-
-    // Sheet base is the bare weapon — add the value of any applied stickers. The 3x only
-    // applies to a standalone/unapplied Katowice sticker (handled above); once it's applied
-    // to a skin, its contribution here is left at native/base value as-is.
-    const stickerVal = Array.isArray(skin.stickers)
-      ? skin.stickers.reduce((s, st) => s + (typeof st.price === 'number' ? st.price : 0), 0) : 0;
-    base += stickerVal;
-
-    base = apply1of1Bonus(skin, base, ranks, skinGroupValue);
-
-    return { calc: base, native, source: 'calculated' };
+    return { calc: price, native, source };
   }
 
   function fmtFull(n) {
