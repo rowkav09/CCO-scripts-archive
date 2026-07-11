@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.0
+// @version      5.1
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -26,24 +26,13 @@
     // csvUrl()/gviz below. If those get published too, give this the new pub ID and this can
     // be generalized the same way.
     LIST_PUB_ID: '2PACX-1vQHX9j8A3dRJrJS-J7Zs7PcIAC-5CgBydhFVOELd92PqPZY2VdJXEDtk4AIDgVl1-lnO_JcV3pBGouy',
-    // "List" is the flattened/curated sheet this script was originally built to read, but
-    // it isn't kept fully in sync with the per-pattern "theme" tabs (e.g. it was missing
-    // Karambit | Marble Fade (Fire and Ice), which does exist over in the Fade(Knife) tab).
-    // We pull all of these in too and merge them, so any pattern present in ANY tab resolves.
-    PATTERN_TAB_GIDS: [
-      804117923,  // Case Hardened
-      432507967,  // Crimson Web
-      227423715,  // Slaughter
-      505008107,  // Fade(Knife)
-      1043476832, // Fade
-      1523542442, // Doppler
-      835833766,  // Misc
-      1392766620, // Glove
-      1701984234, // Case
-      212043798,  // Collection
-      1504192657, // LTD
-      1549085063, // Golds
-    ],
+    // Per explicit instruction: List is now the ONLY pattern-price source — the 12 per-pattern
+    // "theme" tabs (Case Hardened, Doppler, Fade, etc.) that used to be merged in underneath it
+    // are no longer fetched at all. Known tradeoff (flagged and accepted): any pattern that
+    // isn't actually present in List — e.g. Karambit | Marble Fade 'Fire and Ice' was missing
+    // at one point, which is specifically why the theme tabs got pulled in originally — will
+    // fall through to native/QS pricing instead of resolving a sheet price. Fewer requests
+    // either way, which also helps with the rate-limit issues this version is fixing.
     REFRESH_MS: 5 * 60 * 1000,
     CACHE_MS: 60 * 1000,
     // Persisted (localStorage-backed) cache for the inline "Pricedata value" total — survives
@@ -148,59 +137,11 @@
     return null;
   }
 
-  // The per-pattern "theme" tabs (Case Hardened, Fade, Doppler, etc.) don't share a fixed
-  // column layout with each other or with "List" — some have FT/WW/BS columns, some don't,
-  // some split ST/SV into two columns, some combine them ("ST (MW)", "ST/SV"). So instead of
-  // fixed indices we read each tab's own header row and synthesize a "List"-shaped row
-  // (same 31-slot layout calcPrice already expects) out of whichever columns exist.
-  function parsePatternTabToListRows(text) {
-    const rows = parseCSV(text);
-    if (!rows.length) return [];
-    const idx = {};
-    rows[0].forEach((h, i) => {
-      const key = String(h).trim().toUpperCase();
-      if (key === 'PATTERNID') idx.patternId = i;
-      else if (key === 'FN') idx.fn = i;
-      else if (key === 'MW') idx.mw = i;
-      else if (key === 'FT') idx.ft = i;
-      else if (key === 'WW') idx.ww = i;
-      else if (key === 'BS') idx.bs = i;
-      else if (key === 'EV') idx.ev = i;
-      else if (idx.st == null && (key === 'ST' || key === 'ST (MW)' || key === 'ST/SV')) idx.st = i;
-      else if (idx.sv == null && key === 'SV') idx.sv = i;
-    });
-    if (idx.patternId == null) return [];
-    const out = [];
-    for (let r = 1; r < rows.length; r++) {
-      const row = rows[r];
-      const pid = row[idx.patternId] && row[idx.patternId].trim();
-      if (!pid) continue; // section-header / blank spacer rows carry no PatternId
-      const listRow = new Array(31).fill('');
-      if (idx.fn != null) listRow[4] = row[idx.fn];
-      if (idx.mw != null) listRow[5] = row[idx.mw];
-      if (idx.ft != null) listRow[6] = row[idx.ft];
-      if (idx.ww != null) listRow[7] = row[idx.ww];
-      if (idx.bs != null) listRow[8] = row[idx.bs];
-      // Some tabs only have one combined ST/SV-style column; mirror it into both slots
-      // since an item is only ever eligible for one of StatTrak/Souvenir anyway.
-      const stVal = idx.st != null ? row[idx.st] : (idx.sv != null ? row[idx.sv] : '');
-      const svVal = idx.sv != null ? row[idx.sv] : (idx.st != null ? row[idx.st] : '');
-      listRow[9] = stVal;
-      listRow[10] = svVal;
-      if (idx.ev != null) listRow[11] = row[idx.ev];
-      listRow[30] = pid;
-      out.push(listRow);
-    }
-    return out;
-  }
-
   async function loadData() {
     try {
-      const patternFetches = CONFIG.PATTERN_TAB_GIDS.map(gid => origFetch(csvUrl(gid)).then(r => r.text()));
-      const [pdText, listText, ...patternTexts] = await Promise.all([
+      const [pdText, listText] = await Promise.all([
         origFetch(csvUrl(CONFIG.PRICE_DATA_GID)).then(r => r.text()),
         origFetch(listCsvUrl()).then(r => r.text()),
-        ...patternFetches,
       ]);
       const pdRows = parseCSV(pdText);
       const newPriceMap = new Map();
@@ -211,14 +152,10 @@
         if (!isNaN(price)) newPriceMap.set(row[3].trim(), price);
       }
 
-      // Base layer: every theme tab, merged. Where the same PatternId shows up in more than
-      // one theme tab they've matched exactly in spot checks so far, so last-in wins.
+      // List is now the sole pattern-price source (the 12 theme tabs are no longer fetched
+      // or merged in — per explicit instruction). Anything not present here falls through to
+      // native/QS pricing in calcPrice() instead of resolving a sheet price.
       const newListMap = new Map();
-      for (const text of patternTexts) {
-        for (const row of parsePatternTabToListRows(text)) newListMap.set(row[30], row);
-      }
-      // "List" is applied last and always wins ties — it's the sheet meant to back this
-      // script — but anything it's missing now falls back to the theme-tab data above.
       const listRows = parseCSV(listText);
       for (let i = 1; i < listRows.length; i++) {
         const row = listRows[i];
@@ -231,7 +168,7 @@
       dataReady = true;
       globalSortedCache.clear();
       totalsCache.clear();
-      console.log('[cco-pricedata] loaded', newPriceMap.size, 'PriceData rows,', newListMap.size, 'pattern rows (List + theme tabs)');
+      console.log('[cco-pricedata] loaded', newPriceMap.size, 'PriceData rows,', newListMap.size, 'pattern rows (List only)');
       scheduleTick();
     } catch (e) {
       console.error('[cco-pricedata] failed to load sheet data', e);
