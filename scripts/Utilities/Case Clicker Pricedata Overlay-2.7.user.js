@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.5
+// @version      5.6
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -463,12 +463,6 @@
     });
   }
 
-  // ---------- Copy-link button ----------
-  // NOTE: left as a stub on purpose — this is meant to hold the original addCopyBtns
-  // behavior from the zhiro basescript (copy-link button on trade/chat/other-SU cards).
-  // I don't have that original snippet, so paste it in here. Safe no-op until then.
-  function addCopyBtns() { /* paste original copy-link behavior here */ }
-
   // ---------- Totals ----------
   function currentContext() {
     const su = location.pathname.match(/\/inventory\/storageUnits\/([a-f0-9]{24})/);
@@ -523,6 +517,26 @@
     return all;
   }
 
+  // Shared per-context in-flight fetchAllSkins() promise. getGlobalSorted (below) and
+  // triggerTotalsCalculation each independently need a full fetchAllSkins(ctx) result —
+  // without sharing the actual in-flight fetch, triggering both around the same time (e.g.
+  // Pricedata sort is active on a page AND you click the inline total) launched two full
+  // parallel scans of the exact same data: duplicate requests against precisely the rate
+  // limit this whole cache system exists to protect (flagged by zhiro — thanks!). A caller
+  // that joins an already-in-flight fetch doesn't get progress callbacks — only whichever
+  // call actually started the fetch does — but the result itself is shared correctly.
+  const inFlightFetches = new Map(); // key -> promise
+  function fetchAllSkinsShared(ctx, onProgress) {
+    const key = ctx.type === 'su' ? 'su:' + ctx.id : 'inv';
+    const existing = inFlightFetches.get(key);
+    if (existing) return existing;
+    const promise = fetchAllSkins(ctx, onProgress).finally(() => {
+      if (inFlightFetches.get(key) === promise) inFlightFetches.delete(key);
+    });
+    inFlightFetches.set(key, promise);
+    return promise;
+  }
+
   // ---------- True global sort (Pricedata) ----------
   // Reordering only the items already on the current page (old approach) can't produce a
   // real top-to-bottom ranking, because WHICH items land on a given page is decided by the
@@ -538,10 +552,20 @@
     if (cached && !cached.pending && Date.now() - cached.ts < CONFIG.CACHE_MS) return cached.items;
     if (cached && cached.pending) return cached.promise;
     const promise = (async () => {
-      const all = await fetchAllSkins(ctx);
-      const sorted = all.slice().sort((a, b) => calcPrice(b).calc - calcPrice(a).calc);
-      globalSortedCache.set(key, { items: sorted, ts: Date.now(), pending: false });
-      return sorted;
+      try {
+        const all = await fetchAllSkinsShared(ctx);
+        const sorted = all.slice().sort((a, b) => calcPrice(b).calc - calcPrice(a).calc);
+        globalSortedCache.set(key, { items: sorted, ts: Date.now(), pending: false });
+        return sorted;
+      } catch (e) {
+        // A failed/rate-limited fetch (e.g. a non-JSON response body) must not leave this
+        // cache entry permanently "pending" on an already-rejected promise — every future
+        // call would just replay the same dead promise until a full page reload, silently
+        // breaking Pricedata sort until then. Clear it so the next call actually retries.
+        console.error('[cco-pricedata] global sort failed', e);
+        globalSortedCache.delete(key);
+        throw e;
+      }
     })();
     globalSortedCache.set(key, Object.assign({}, cached, { pending: true, promise }));
     return promise;
@@ -591,7 +615,7 @@
     if (already && already.pending) return already.pending;
     const promise = (async () => {
       try {
-        const all = await fetchAllSkins(ctx);
+        const all = await fetchAllSkinsShared(ctx);
         let calc = 0, native = 0;
         all.forEach(s => { if (!isIncluded(s._id)) return; const r = calcPrice(s); calc += r.calc; native += r.native; });
         const res = { calc, native, ts: Date.now(), pending: false };
@@ -1620,7 +1644,6 @@
       updateCardPrices();
     }
     updateExtraCardPrices();
-    addCopyBtns();
     // renderInlineTotal() is now a plain (synchronous, non-fetching) render — it shows
     // whatever's already cached/persisted, or a click prompt if nothing's been calculated
     // yet. The actual scan (fetchAllSkins) only runs from that click now, not from every tick.
@@ -1633,10 +1656,18 @@
 
   // ---------- Bootstrap ----------
   function init() {
+    // Observing document.body meant ANY DOM mutation anywhere on the page scheduled a tick —
+    // including every single Global Chat message arriving, since chat lives in its own
+    // <aside>/complementary panel that's a SIBLING of <main>, not inside it. The 50ms debounce
+    // in scheduleTick() kept this from being catastrophic, but an active chat still meant
+    // near-constant re-querying of the DOM for work that's only ever relevant inside <main>
+    // (cards, totals, buttons, etc.). Scoping the observer to <main> alone means chat activity
+    // no longer triggers a tick at all (flagged by zhiro — thanks!).
+    const observeRoot = document.querySelector('main') || document.body;
     const observer = new MutationObserver(() => {
       scheduleTick();
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(observeRoot, { childList: true, subtree: true });
     loadData();
     setInterval(loadData, CONFIG.REFRESH_MS);
     primeCurrentPage();
