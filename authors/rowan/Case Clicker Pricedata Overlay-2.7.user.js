@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.6
+// @version      5.7
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -19,37 +19,25 @@
     SHEET_ID: '1DmJr6L6oIUZPDUZBg0DxnqZ8Xhk7nhzLOy6jv3yi02A',
     PRICE_DATA_GID: 1858636668,
     LIST_GID: 1167749951,
-    // The List tab specifically is now served from a "Publish to web" CSV link instead of the
-    // gviz/tq export — per explicit instruction. Note this pub link is scoped to just the List
-    // sheet (Google's per-sheet publish, not "entire document") — confirmed live that the same
-    // pub ID does NOT resolve other gids (PriceData, pattern tabs), so those still go through
-    // csvUrl()/gviz below. If those get published too, give this the new pub ID and this can
-    // be generalized the same way.
+    // List tab is served via a "Publish to web" CSV link (not gviz/tq) — this pub ID is scoped
+    // to the List sheet only; PriceData and other gids still use csvUrl()/gviz below.
     LIST_PUB_ID: '2PACX-1vQHX9j8A3dRJrJS-J7Zs7PcIAC-5CgBydhFVOELd92PqPZY2VdJXEDtk4AIDgVl1-lnO_JcV3pBGouy',
-    // Per explicit instruction: List is now the ONLY pattern-price source — the 12 per-pattern
-    // "theme" tabs (Case Hardened, Doppler, Fade, etc.) that used to be merged in underneath it
-    // are no longer fetched at all. Known tradeoff (flagged and accepted): any pattern that
-    // isn't actually present in List — e.g. Karambit | Marble Fade 'Fire and Ice' was missing
-    // at one point, which is specifically why the theme tabs got pulled in originally — will
-    // fall through to native/QS pricing instead of resolving a sheet price. Fewer requests
-    // either way, which also helps with the rate-limit issues this version is fixing.
+    // List is the only pattern-price source; the per-pattern "theme" tabs are not fetched.
+    // A pattern missing from List falls back to native/QS pricing in calcPrice() instead of
+    // a sheet price.
     REFRESH_MS: 5 * 60 * 1000,
     CACHE_MS: 60 * 1000,
-    // Persisted (localStorage-backed) cache for the inline "Pricedata value" total — survives
-    // page navigation, unlike totalsCache/globalSortedCache which are in-memory only and reset
-    // on every reload. Long TTL on purpose: this number is only ever refreshed by an explicit
-    // click now (see triggerTotalsCalculation), so there's no harm showing a slightly-stale
-    // cached figure instantly rather than re-scanning every visit.
+    // Persisted (localStorage) cache for the inline total — survives navigation, unlike
+    // totalsCache/globalSortedCache (in-memory only). Long TTL is fine since totals only
+    // refresh via triggerTotalsCalculation() (an explicit click, or the SU auto-scan below),
+    // never on a timer.
     LOCAL_CACHE_MS: 10 * 60 * 1000,
-    // Delay between successive page fetches in fetchAllSkins — a full inventory/storage-unit
-    // scan used to fire every page request at once (Promise.all), which was tripping the
-    // site's rate limiter on larger inventories/storage units. Sequential + a small gap is
-    // slower but reliable. Applies to both inventory and storage-unit scans (same function).
+    // Delay between page fetches in fetchAllSkins. Fetching all pages at once (Promise.all)
+    // trips the site's rate limiter on large inventories/storage units.
     FETCH_DELAY_MS: 350,
     QUALITY_BASE: 7,
-    // Fill this in once you've deployed the Vercel API (see the two files provided alongside
-    // this script: api/submit-score.js and api/leaderboard.js). Leave blank to disable the
-    // leaderboard feature entirely (no submissions, no custom category on /leaderboard).
+    // Vercel API base for the leaderboard (see api/submit-score.js, api/leaderboard.js).
+    // Leave blank to disable leaderboard submissions/display entirely.
     LEADERBOARD_API_BASE: 'https://cco-leaderboard-api.vercel.app',
   };
 
@@ -67,9 +55,8 @@
                               // in DOM order (visual sort uses CSS `order`, so DOM order never changes)
   const totalsCache = new Map();
 
-  // Per-skin-instance "include in total" toggle. Deliberately in-memory only (never touches
-  // localStorage) — resets to "everything included" on every reload, per spec. Keyed by the
-  // skin's own _id from the API, since that's stable per-instance across re-renders.
+  // Per-skin-instance "include in total" toggle — in-memory only (resets on reload).
+  // Keyed by the skin's own _id since that's stable per-instance across re-renders.
   const excludedIds = new Set();
   function isIncluded(id) { return !id || !excludedIds.has(id); }
   function setIncluded(id, included) {
@@ -127,11 +114,7 @@
     if (str[0] === 'x' || str[0] === 'X') { const v = parseFloat(str.slice(1)); return isNaN(v) ? null : { type: 'mult', value: v }; }
     if (str[0] === '+') { const v = parseMagnitude(str.slice(1)); return v == null ? null : { type: 'add', value: v }; }
     if (str[0] === '-') { const v = parseMagnitude(str.slice(1)); return v == null ? null : { type: 'add', value: -v }; }
-    // Some rows give a flat set price instead of a multiplier/adjustment — e.g. an EV cell of
-    // "3.0M" rather than "x3". No leading x/+/- means it's not a multiplier or an offset, it's
-    // the final dollar figure to use outright. Confirmed live: several EV cells in the Doppler
-    // tab mix "x3"-style multipliers with bare "3.0M"-style set values in the same column —
-    // the bare ones were silently falling through to null (no bonus applied at all) before.
+    // No leading x/+/- means this is a flat set price (e.g. "3.0M"), not a multiplier/offset.
     const setVal = parseMagnitude(str);
     if (setVal != null) return { type: 'set', value: setVal };
     return null;
@@ -152,9 +135,8 @@
         if (!isNaN(price)) newPriceMap.set(row[3].trim(), price);
       }
 
-      // List is now the sole pattern-price source (the 12 theme tabs are no longer fetched
-      // or merged in — per explicit instruction). Anything not present here falls through to
-      // native/QS pricing in calcPrice() instead of resolving a sheet price.
+      // List is the sole pattern-price source; anything missing here falls through to
+      // native/QS pricing in calcPrice().
       const newListMap = new Map();
       const listRows = parseCSV(listText);
       for (let i = 1; i < listRows.length; i++) {
@@ -176,49 +158,35 @@
   }
 
   // ---------- Pricing ----------
-  // Rewritten to mirror the reference bot's calculateSkinPrice() line-for-line (given verbatim):
-  // ordering matters — the 1/1 bonus applies BEFORE ST/SV/EV (so those stack on top of it, not
-  // the other way around), ST/SV/EV/quality all run unconditionally off whatever `price`
-  // currently holds (no gating on whether a sheet wear-price was actually found), quality
-  // scaling resets to the bare skin.weaponPrice when no wear price was found (discarding
-  // whatever the initial skin.price carried), and the sticker contribution is restored at the
-  // very end as (skin.price - skin.weaponPrice) rather than resummed from skin.stickers[].
-  // priceDataByName (flat name -> price, from the PriceData tab) is still fetched/parsed above
-  // but intentionally no longer consulted here — the reference's non-pattern branch has no
-  // equivalent flat lookup at all, so this now matches it exactly rather than overriding with
-  // an extra data source it never asked for.
+  // Mirrors the reference bot's calculateSkinPrice(): the 1/1 bonus applies before ST/SV/EV
+  // (so those stack on top of it), ST/SV/EV/quality run unconditionally on whatever `price`
+  // currently holds (no gating on whether a sheet wear-price was found), quality scaling resets
+  // to the bare weaponPrice when no wear price was found, and the sticker contribution is
+  // restored at the end as (skin.price - skin.weaponPrice) rather than resummed from stickers[].
+  // priceDataByName (flat name->price) is parsed but intentionally unused here — the reference's
+  // non-pattern branch has no equivalent flat lookup.
 
-  // Some patterns are correctly flagged as real event drops (skin.event truthy) but their
-  // specific pattern has no EV multiplier documented anywhere in the sheet — e.g. Talon Knife
-  // Fade '100% Fade'/'80% Fade' during Halloween 2025: every other knife pattern in that same
-  // "Fade(Knife)" tab has an EV value (x3), these two rows are just blank. Rather than silently
-  // falling through to no event bonus at all, use explicit fallback base values (pre quality
-  // scaling, same slot as the sheet's own wearPrice) given directly for these two patterns.
+  // Patterns flagged as event drops (skin.event) with no EV multiplier documented in the sheet.
+  // Explicit fallback base values (pre quality-scaling) for these two.
   const EVENT_EV_FALLBACK_BY_PATTERN_ID = {
     '65a652a7fdd7ea906a8f8767': 3000000,  // Talon Knife | Fade '100% Fade'
     '65a652acfdd7ea906a8f8768': 800000,   // Talon Knife | Fade '80% Fade'
   };
 
-  // Applies a parsed ST/SV/EV cell to a running base price. 'mult' (e.g. "x3") multiplies,
-  // 'add' (e.g. "+50000"/"-50000") offsets, and 'set' (a bare value like "3.0M" with no
-  // leading x/+/-) replaces the base outright — some sheet rows give a flat final price for
-  // an adjustment instead of a multiplier, and treating a "set" value as if it were "add"
-  // (the old fallback for anything non-'mult') would have produced a wildly wrong total.
+  // Applies a parsed ST/SV/EV cell: 'mult' multiplies, 'add' offsets, 'set' replaces the base
+  // outright (some rows give a flat final price instead of a multiplier/offset).
   function applyAdjustment(base, adj) {
     if (adj.type === 'mult') return base * adj.value;
     if (adj.type === 'set') return adj.value;
     return base + adj.value; // 'add'
   }
 
-  // "1/1" bonus: a copy that is simultaneously the LOWEST-float AND HIGHEST-float instance
-  // for its pattern/skingroup within an event is effectively one-of-one — no other copy can
-  // hold both extremes at once. Ranks come straight off skin.floatRanks (the game's own
-  // per-item field), read positionally in the exact order the API actually returns them
-  // (verified live): index 6/7 = lowestFloatbyEventSkingroupRank / highestFloatbyEventSkingroupRank
-  // (non-pattern skins), index 18/19 = lowestFloatbyEventPatternRank / highestFloatbyEventPatternRank
-  // (pattern skins — Doppler phases included, no exclusion). "Tier" Skin Group patterns (the
-  // generic "Tier 1"-"Tier 5" buckets, native/QS-priced with no sheet FN/MW value) get a flat
-  // $5M instead of the 15x multiplier since there's no calculated price to multiply at all.
+  // "1/1": lowest-float AND highest-float instance for its pattern/skingroup within an event —
+  // no other copy can hold both extremes. Ranks are read positionally off skin.floatRanks:
+  // index 6/7 = lowest/highestFloatbyEventSkingroupRank (non-pattern skins), index 18/19 =
+  // lowest/highestFloatbyEventPatternRank (pattern skins, Doppler phases included). "Tier"
+  // Skin Group patterns get a flat $5M instead of 15x since there's no calculated price to
+  // multiply.
   function getFloatRanks(skin) {
     return skin.floatRanks ? Object.values(skin.floatRanks) : [];
   }
@@ -242,16 +210,14 @@
       let hasPrice = false;
       if (wearPrice != null) { price = wearPrice; hasPrice = true; }
 
-      // 1/1 bonus applies first — ST/SV/EV below stack on top of it, per the reference.
+      // 1/1 bonus first; ST/SV/EV below stack on top of it.
       if (ranks[18] === 1 && ranks[19] === 1) {
         price = skinGroupValue === 'Tier' ? 5000000 : Math.max(5000000, price * 15);
       }
 
-      // Skin Group "Knife08" (e.g. Nomad Knife | Fade '100% Fade') is a documented exception
-      // straight from the reference bot: its ST column ("ST (MW)" in the sheet) is only ever
-      // populated for the Minimal Wear copy — applying it to Factory New too (as this used to
-      // do) inflated FN StatTrak cards by the MW-only multiplier. Confirmed live: FN ST 100%
-      // Fade Nomad Knife should price the same as the non-ST FN copy, not FN base * ST * EV.
+      // Skin Group "Knife08" (e.g. Nomad Knife | Fade '100% Fade'): the ST column is only
+      // populated for the Minimal Wear row. Applying it to Factory New too over-inflates FN
+      // StatTrak prices.
       const skipStForKnife08FN = skinGroupValue === 'Knife08' && skin.exterior === 'Factory New';
       if (skin.statTrak) {
         if (!skipStForKnife08FN) { const adj = parseAdjustment(row[9]); if (adj) price = applyAdjustment(price, adj); }
@@ -259,10 +225,7 @@
         const adj = parseAdjustment(row[10]); if (adj) price = applyAdjustment(price, adj);
       }
 
-      // EV (event) multiplier ONLY applies to actual event skins. Confirmed via /price
-      // ground truth: a non-event Crimson Web 'Centered Web' Stiletto Knife (BS, quality 2)
-      // priced at exactly base*7^quality with NO EV applied ($7.84M) — applying EV
-      // unconditionally was tried and contradicted by the bot, so this stays gated.
+      // EV only applies to actual event skins — verified against reference output.
       if (skin.event) {
         const ev = parseAdjustment(row[11]);
         if (ev) price = applyAdjustment(price, ev);
@@ -271,33 +234,28 @@
 
       const quality = typeof skin.quality === 'number' ? skin.quality : 0;
       if (quality) {
-        // No valid wear price found: reset to the bare weapon price (discarding whatever
-        // `price` held so far) before applying quality scaling — matches the reference exactly.
+        // No valid wear price found: reset to the bare weapon price before quality scaling.
         price = hasPrice ? price : weaponPrice;
         price = price * (quality > 0 ? Math.pow(CONFIG.QUALITY_BASE, quality) : 1);
       }
 
-      // The sheet price is for the bare weapon — restore whatever sticker value the game itself
-      // already baked into skin.price (skin.price - skin.weaponPrice), since `price` above may
-      // have replaced skin.price entirely with the sheet's own number.
+      // Restore the sticker value the game already baked into skin.price, since `price` above
+      // may have replaced skin.price entirely with the sheet's own number.
       if (skinPrice !== weaponPrice) price = price + (skinPrice - weaponPrice);
 
       source = hasPrice ? 'calculated' : 'calculated-no-wear-price';
     } else if (!skin.patternId) {
-      // No patternId at all: flat non-pattern 1/1 bonus only, nothing else — matches the
-      // reference's `else` branch exactly. (patternId present but no matching sheet row falls
-      // through here too, per the reference: price stays at raw skin.price, no bonus at all.)
+      // No patternId: flat non-pattern 1/1 bonus only, nothing else. (patternId present but no
+      // matching sheet row falls through here too: price stays at raw skin.price, no bonus.)
       if (ranks[6] === 1 && ranks[7] === 1) price += 5000000;
     }
 
     // Final unconditional overrides, applied regardless of branch above.
     if (typeof skin.name === 'string' && skin.name.includes('Terminal')) { price = 25000; source = 'terminal-flat'; }
 
-    // Unapplied/standalone Katowice 2014 holo stickers aren't real skins — no patternId, no
-    // per-pattern sheet row — so they'd otherwise fall through to raw native price. Priced
-    // instead at 3x their own quality-scaled ("QS") base: weaponPrice*7^quality if this copy
-    // carries a quality tier, otherwise just its own price as-is (quality 0 is the norm for a
-    // standalone sticker item, so this is usually just skinPrice*3).
+    // Unapplied Katowice 2014 holo stickers have no patternId/sheet row and would otherwise
+    // fall through to raw native price. Priced at 3x their own quality-scaled ("QS") base:
+    // weaponPrice*7^quality if this copy carries a quality tier, otherwise just its own price.
     if (typeof skin.name === 'string' && skin.name.includes('(Holo) | Katowice 2014')) {
       const kQuality = typeof skin.quality === 'number' ? skin.quality : 0;
       const qsBase = kQuality > 0 ? weaponPrice * Math.pow(CONFIG.QUALITY_BASE, kQuality) : skinPrice;
@@ -314,7 +272,7 @@
   }
 
   // ---------- Display rounding (Pricedata Scan menu only) ----------
-  // Persisted display preference for the scan menu's own numbers — Full (exact, with cents),
+  // Persisted display preference for the scan menu's numbers — Full (exact, with cents),
   // Rounded (nearest whole dollar), or abbreviated to 2/3 significant figures (e.g. $1.8M /
   // $1.82M). Doesn't touch card badges or the leaderboard — this only affects the menu.
   function getNumberFormat() {
@@ -392,10 +350,8 @@
   }
 
   // ---------- Include-in-total toggle ----------
-  // A small dot placed right below the card's own info ("i") button. The star (favorite)
-  // and info buttons already live stacked in a flex column (.mantine-Stack-root) with
-  // nothing else in it, so appending here just adds a third item below them — no absolute
-  // positioning needed. Default state is "included" (untouched dot = filled/on).
+  // Small dot below the card's info button — the star/info buttons already sit in a flex
+  // column with nothing else, so this just appends a third item. Default state is "included".
   function injectIncludeToggle(card, skin) {
     if (!skin || !skin._id) return;
     const infoBtns = card.querySelectorAll('.mantine-ActionIcon-root[data-variant="transparent"]');
@@ -422,17 +378,11 @@
   }
 
   // ---------- Generic price overlay (trade board + "Add skins to trade" modal) ----------
-  // The trade page (both my side and the other player's side of the board) and the
-  // "Add skins to trade" picker modal never go through our own window.fetch takeover —
-  // the board updates over what looks like a websocket/live-sync channel, and the modal's
-  // item list is entirely client-side (opening it and paging through it fires zero network
-  // requests), so there's no response body for us to intercept or pair against
-  // `currentPageSkins` like on /inventory and storage-unit pages. Instead we read the skin
-  // object straight off each card's own React fiber (Mantine Card components receive it as
-  // a `skin` prop a few hops up) — this works regardless of route, pagination style, or
-  // how the card's data got there. Cards already handled by the index-paired
-  // updateCardPrices() above are skipped (they already carry the ccoTooltip marker), so this
-  // is purely a fallback for surfaces that function can't reach.
+  // These surfaces never go through our fetch patch — the trade board updates via a live-sync
+  // channel and the modal's item list is client-side with no network requests, so there's no
+  // response body to pair against currentPageSkins. Instead read the skin object off the card's
+  // own React fiber (Mantine Card receives it as a `skin` prop a few hops up). Cards already
+  // handled by updateCardPrices() are skipped via the ccoTooltip marker.
   function getSkinFromCardFiber(card) {
     const key = Object.keys(card).find(k => k.startsWith('__reactFiber'));
     if (!key) return null;
@@ -470,16 +420,11 @@
     if (location.pathname === '/inventory') return { type: 'inv' };
     return null;
   }
-  // The site remembers its own Sort selection (Latest/Price/Float/Float Ranks) and always
-  // includes it as a `sort=` query param on its OWN fetches (confirmed by watching real
-  // requests: Latest -> '', Price -> 'price', Float -> 'float', Float Ranks -> 'rank'). Any
-  // fetch WE make ourselves has to use that same value, or the array we get back is ordered
-  // differently than the cards actually on screen — pairing each card with the wrong skin's
-  // price. We read the CURRENT selection straight off the native Sort dropdown (its input
-  // shows the human label) rather than waiting to intercept a real request, since on a fresh
-  // page load the site's own initial fetch can happen before our fetch patch even attaches —
-  // waiting for interception would silently keep guessing wrong until the user manually
-  // changed sort at least once.
+  // The site includes its own Sort selection as a `sort=` param on its OWN fetches (Latest->'',
+  // Price->'price', Float->'float', Float Ranks->'rank'). Our own fetches must match it or the
+  // returned array order won't line up with the cards on screen. Read directly off the Sort
+  // dropdown's displayed value rather than waiting to intercept a real request, since the site's
+  // initial page-load fetch can happen before our fetch patch attaches.
   const SORT_LABEL_TO_PARAM = { 'Latest': '', 'Price': 'price', 'Float': 'float', 'Float Ranks': 'rank' };
   let lastKnownSort = null; // last value actually seen on a real, intercepted site request (cross-check only)
   function getCurrentSortParam() {
@@ -498,11 +443,8 @@
   }
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-  // Sequential with a small delay between requests — this used to fire every page of a
-  // scan at once via Promise.all, which was tripping the site's rate limiter on bigger
-  // inventories/storage units (missing prices, broken sort — the response for a burst
-  // request would come back empty/erroring and we'd silently rank it wrong). Slower, but
-  // it actually finishes correctly. Shared by both inventory and storage-unit scans.
+  // Sequential with a delay between requests — fetching all pages at once (Promise.all) trips
+  // the site's rate limiter on large inventories/storage units. Shared by inventory + SU scans.
   async function fetchAllSkins(ctx, onProgress) {
     const first = await origFetch(listUrlFor(ctx, 1), { credentials: 'include' }).then(r => r.json());
     const pages = first.pages || 1;
@@ -517,14 +459,11 @@
     return all;
   }
 
-  // Shared per-context in-flight fetchAllSkins() promise. getGlobalSorted (below) and
-  // triggerTotalsCalculation each independently need a full fetchAllSkins(ctx) result —
-  // without sharing the actual in-flight fetch, triggering both around the same time (e.g.
-  // Pricedata sort is active on a page AND you click the inline total) launched two full
-  // parallel scans of the exact same data: duplicate requests against precisely the rate
-  // limit this whole cache system exists to protect (flagged by zhiro — thanks!). A caller
-  // that joins an already-in-flight fetch doesn't get progress callbacks — only whichever
-  // call actually started the fetch does — but the result itself is shared correctly.
+  // Shared per-context in-flight fetchAllSkins() promise. getGlobalSorted and
+  // triggerTotalsCalculation each need a full fetchAllSkins(ctx) result — without sharing the
+  // in-flight fetch, triggering both around the same time launches two parallel scans of the
+  // same data. A caller joining an already-in-flight fetch doesn't get progress callbacks —
+  // only the call that started the fetch does — but the result itself is shared correctly.
   const inFlightFetches = new Map(); // key -> promise
   function fetchAllSkinsShared(ctx, onProgress) {
     const key = ctx.type === 'su' ? 'su:' + ctx.id : 'inv';
@@ -538,12 +477,10 @@
   }
 
   // ---------- True global sort (Pricedata) ----------
-  // Reordering only the items already on the current page (old approach) can't produce a
-  // real top-to-bottom ranking, because WHICH items land on a given page is decided by the
-  // site's own native sort before we ever see them — a $30M item can sit on page 3 while
-  // page 1 shows $700k items. To fix that properly we fetch every page ourselves, rank
-  // everything once, and hand the site back the correct slice for whatever page it asked
-  // for (see the window.fetch patch below) so its own rendering shows the right items.
+  // Reordering only the current page can't produce a true ranking, since which items land on
+  // a given page is decided by the site's own native sort before we ever see them. Fetch every
+  // page, rank everything once, and hand back the correct slice for whatever page was requested
+  // (see the window.fetch patch below).
   const globalSortedCache = new Map();
   let knownPageSize = null;
   async function getGlobalSorted(ctx) {
@@ -558,10 +495,8 @@
         globalSortedCache.set(key, { items: sorted, ts: Date.now(), pending: false });
         return sorted;
       } catch (e) {
-        // A failed/rate-limited fetch (e.g. a non-JSON response body) must not leave this
-        // cache entry permanently "pending" on an already-rejected promise — every future
-        // call would just replay the same dead promise until a full page reload, silently
-        // breaking Pricedata sort until then. Clear it so the next call actually retries.
+        // A failed fetch must not leave this cache entry permanently pending on a rejected
+        // promise — every future call would replay the same dead promise until a reload.
         console.error('[cco-pricedata] global sort failed', e);
         globalSortedCache.delete(key);
         throw e;
@@ -585,13 +520,9 @@
     try { localStorage.setItem('cco_totals_' + key, JSON.stringify({ calc, native, ts: Date.now() })); } catch (e) { /* storage full/blocked — cache is best-effort */ }
   }
 
-  // Read-only: never fetches. Inventory/storage-unit scans used to run automatically on
-  // every tick (every few seconds while the page was open), which was hammering the site's
-  // API hard enough to get rate-limited — that's what was breaking both the price display
-  // and the global sort. Now the only things that ever call fetchAllSkins are explicit user
-  // actions (this click, the Sort dropdown's "Pricedata" option, or the Scan All button).
-  // This just answers "do we already know the total" from memory or a fresh-enough
-  // localStorage cache — if not, the caller (renderInlineTotal) shows a click prompt instead.
+  // Read-only: never fetches. Answers "do we already know the total" from memory or a
+  // fresh-enough localStorage cache; if not, the caller (renderInlineTotal) shows a click
+  // prompt instead. Actual fetching only happens in triggerTotalsCalculation().
   function getCachedTotals() {
     const ctx = currentContext();
     if (!ctx) return null;
@@ -606,7 +537,9 @@
     return cached && cached.pending ? cached : null;
   }
 
-  // The actual fetch-and-compute, only ever run from an explicit click (see renderInlineTotal).
+  // The actual fetch-and-compute. Normally reached from an explicit user action (inline total
+  // click, Sort->Pricedata, Scan All) — but autoScanStorageUnitIfNeeded() below also calls this
+  // automatically once per storage-unit visit. Don't assume every call here traces back to a click.
   async function triggerTotalsCalculation() {
     const ctx = currentContext();
     if (!ctx) return null;
@@ -655,12 +588,9 @@
     return { calc, native, count: skins.length, includedCount };
   }
 
-  // Persists both the in-memory totalsCache and the localStorage-backed cache for a given
-  // key, exactly like triggerTotalsCalculation() already does for whichever single page
-  // you're currently viewing — scanAll uses the same two caches so a full scan updates the
-  // stored value for EVERY storage unit (and inventory), not just whichever one is on screen.
-  // This is what lets the scan menu (and the inline per-page total) show a fresh number for
-  // any unit without re-fetching it.
+  // Writes both the in-memory totalsCache and the persisted localStorage cache for a key —
+  // the same two caches triggerTotalsCalculation() uses for the current page, so scanAll can
+  // update every storage unit (and inventory) in one pass, not just whichever one is on screen.
   function cacheTotal(key, calc, native) {
     totalsCache.set(key, { calc, native, ts: Date.now(), pending: false });
     savePersistedTotals(key, calc, native);
@@ -693,7 +623,7 @@
 
   // Premier rank/rating live on /api/me (the game-stats endpoint) alongside money/xp/etc —
   // fetched fresh on every Scan All so the modal and leaderboard submission both reflect
-  // your current Premier standing, not whatever it was on page load.
+  // current Premier standing, not whatever it was on page load.
   async function fetchPremierStats() {
     try {
       const me = await origFetch('/api/me', { credentials: 'include' }).then(r => r.json());
@@ -711,9 +641,9 @@
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  // Persisted (unlike the per-card include toggle) since this is a one-time privacy choice
-  // about broadcasting your name/avatar/net worth, not a per-scan ephemeral setting. Defaults
-  // ON per explicit request — still an easy per-user opt-out via the modal's toggle.
+  // Persisted (unlike the per-card include toggle) — a one-time privacy choice about
+  // broadcasting name/avatar/net worth, not a per-scan setting. Defaults ON; opt-out via
+  // the scan menu's toggle.
   function lbSubmitEnabled() { return localStorage.getItem('cco_lbSubmitEnabled') !== 'false'; }
   function setLbSubmitEnabled(on) { localStorage.setItem('cco_lbSubmitEnabled', on ? 'true' : 'false'); }
 
@@ -732,15 +662,14 @@
     inner.appendChild(document.createTextNode(text));
   }
 
-  // ---------- Inventory-value leaderboard (backed by your own Vercel API) ----------
+  // ---------- Inventory-value leaderboard (backed by own Vercel API) ----------
   // Contract (see api/submit-score.js + api/leaderboard.js shipped alongside this script):
   //   POST {LEADERBOARD_API_BASE}/api/submit-score
   //     body: { userId, username, avatarUrl, totalValue, nativeValue }  -> { ok: true }
   //   GET  {LEADERBOARD_API_BASE}/api/leaderboard?limit=50
   //     -> { entries: [{ rank, userId, username, avatarUrl, totalValue, nativeValue, updatedAt }] }
-  // /api/me is the game-stats endpoint (money, xp, limits, etc.) — it has no user identity
-  // fields at all. Identity (id/name/image) actually lives on the auth session endpoint,
-  // confirmed live: GET /api/auth/get-session -> { session, user: { id, name, image, ... } }.
+  // User identity isn't on /api/me (game stats only) — it lives on the auth session endpoint:
+  // GET /api/auth/get-session -> { session, user: { id, name, image, ... } }.
   let meCache = null;
   async function getMe() {
     if (meCache) return meCache;
@@ -763,9 +692,8 @@
       const premierRankId = premier && typeof premier.premierRankId === 'number' ? premier.premierRankId : null;
       await origFetch(CONFIG.LEADERBOARD_API_BASE.replace(/\/$/, '') + '/api/submit-score', {
         method: 'POST',
-        // X-CCO-Client: the API now rejects submissions without this tag (added after someone
-        // posted forged entries — "ROWAN"/userId "7" and "Demo" with a 999-trillion total —
-        // straight to the endpoint with curl/devtools). Must match CLIENT_TAG in submit-score.js.
+        // X-CCO-Client: the API rejects submissions without this tag (added after forged
+        // entries were posted straight to the endpoint). Must match CLIENT_TAG in submit-score.js.
         headers: { 'Content-Type': 'application/json', 'X-CCO-Client': 'cco-overlay-v1' },
         body: JSON.stringify({ userId, username, avatarUrl, totalValue: grandCalc, nativeValue: grandNative, premierRating, premierRankId }),
       });
@@ -789,12 +717,11 @@
 
   let scanning = false;
 
-  // ---------- Scan menu (replaces the old immediate-scan + results-modal flow) ----------
-  // Opens as a dropdown panel below the button instead of blocking on a full scan. Shows
-  // whatever's already cached locally (loadPersistedTotals — the same localStorage cache the
-  // inline per-page total uses) for inventory and every storage unit immediately, lets you
-  // trigger a fresh Scan All from inside the menu with live progress, toggle leaderboard
-  // submission, and click any storage unit row to open it.
+  // ---------- Scan menu (dropdown, replaces the old immediate-scan + results-modal flow) ----------
+  // Shows whatever's already cached locally (loadPersistedTotals — the same localStorage cache
+  // the inline per-page total uses) for inventory and every storage unit immediately, lets you
+  // trigger a fresh Scan All with live progress, toggle leaderboard submission, and click any
+  // storage unit row to open it.
   let scanMenuEl = null;
   let scanMenuBtn = null;
 
@@ -844,7 +771,7 @@
   }
 
   // Re-renders every value currently shown in the menu using whatever display-format is
-  // selected right now — called once when the format buttons are toggled, so switching
+  // selected right now — called when the format buttons are toggled, so switching
   // Full/Rounded/2SF/3SF doesn't require a re-scan or reopening the menu.
   function reformatScanMenuValues() {
     if (!scanMenuEl) return;
@@ -933,8 +860,7 @@
     suListEl.style.cssText = 'margin-top:2px;';
     panel.appendChild(suListEl);
 
-    // Leaderboard opt-in toggle — always visible here now (previously only shown in the
-    // post-scan modal, so there was no way to see/change it without running a scan first).
+    // Leaderboard opt-in toggle — visible here directly, not gated behind running a scan first.
     if (CONFIG.LEADERBOARD_API_BASE) {
       const lbRow = document.createElement('div');
       lbRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;' +
@@ -1023,21 +949,17 @@
     openScanMenu(btn);
   }
 
-  // Opens the raw @updateURL in a new tab. Tampermonkey intercepts .user.js URLs itself and,
-  // if a script with the same @namespace/@name is already installed, shows its own "Update"
-  // (rather than "Install") prompt when the remote @version is newer — confirmed live, this
-  // is exactly what happens navigating to raw.githubusercontent.com/.../*.user.js. So this
-  // link is a real manual "check now" trigger, not just a link to the source.
+  // Opens the raw @updateURL. Tampermonkey intercepts .user.js URLs and shows its own
+  // Update/Install prompt when the remote @version is newer than what's installed.
   function onUpdateButtonClick() {
     window.open('https://raw.githubusercontent.com/rowkav09/CCO-scripts-archive/main/scripts/Utilities/Case%20Clicker%20Pricedata%20Overlay-2.7.user.js', '_blank');
   }
 
-  // Cloning one of the native columns (Float Rank Management / Custom Sell / Storage Units /
-  // Special Effects) and appending it into the SAME row — rather than the old approach of
-  // cloning the whole row into a second row underneath — keeps identical Mantine classes and
-  // puts everything in one bar, per explicit request. All columns (native + ours) are then
-  // force-resized to an even share so the row still fits. Re-run every tick (cheap, and
-  // self-healing if the site ever re-renders this row and drops our appended column).
+  // Clones one of the native columns (Float Rank Management / Custom Sell / Storage Units /
+  // Special Effects) and appends it into the SAME row, rather than a second row underneath, so
+  // it keeps identical Mantine classes and everything fits in one bar. All columns (native +
+  // ours) are then force-resized to an even share so the row still fits. Re-run every tick —
+  // cheap, and self-healing if the site ever re-renders this row and drops our column.
   function injectScanButton() {
     const srcBtn = [...document.querySelectorAll('button')].find(b => /Float Rank Management|Storage Units|Special Effects|Custom Sell/.test(b.textContent));
     if (!srcBtn) return;
@@ -1073,11 +995,11 @@
   }
 
   // ---------- Current-page skin capture ----------
-  // The site fetches its inventory list via window.fetch itself; we patch it so we can
-  // see the same response the page just rendered, instead of guessing. We only accept a
-  // response as "the visible page" if both its route/context AND its page number match
-  // what's actually on screen right now (the site prefetches other pages too, e.g. for
-  // its own running total, so a length-only check isn't reliable).
+  // The site fetches its inventory list via window.fetch itself; we patch it so we can see the
+  // same response the page just rendered, instead of guessing. A response only counts as "the
+  // visible page" if both its route/context AND its page number match what's actually on screen
+  // right now (the site prefetches other pages too, e.g. for its own running total, so a
+  // length-only check isn't reliable).
   function parseListUrl(url) {
     try {
       const u = new URL(url, location.origin);
@@ -1191,11 +1113,11 @@
   }
 
   // ---------- Sort (native / pricedata) ----------
-  // Sorting itself now happens at the data layer: when "Pricedata" is active, the
-  // window.fetch patch above rewrites the actual server response to already be the
-  // correct globally-ranked slice, so cards render in true rank order via the site's own
-  // pipeline. No CSS reordering needed here anymore — just mirror the (already-correct)
-  // page data and clear any leftover `order` from an older version of this script.
+  // Sorting happens at the data layer: when "Pricedata" is active, the window.fetch patch
+  // above rewrites the actual server response to already be the correct globally-ranked
+  // slice, so cards render in true rank order via the site's own pipeline. No CSS reordering
+  // needed here — just mirror the (already-correct) page data and clear any leftover `order`
+  // from an older version of this script.
   function applySort() {
     const cards = [...document.querySelectorAll('.mantine-Card-root')];
     currentPageSkins = nativePageSkins.slice();
@@ -1212,10 +1134,9 @@
   // ---------- Native "Sort" dropdown integration ----------
   // The site's own Sort control is a Mantine Select (Latest / Price / Float / Float Ranks)
   // that re-fetches from the server with a `sort=` param on selection. Pricedata sorting is
-  // purely client-side, so instead of a separate toggle UI we add a "Pricedata" entry to
-  // this same dropdown. Clicking a REAL option (Latest/Price/etc.) is left to the site;
-  // clicking ours flips sortMode and re-closes the dropdown (clicking the input itself is
-  // what actually toggles it open/closed here — outside clicks and Escape don't).
+  // purely client-side, so instead of a separate toggle UI we add a "Pricedata" entry to this
+  // same dropdown. Clicking a REAL option (Latest/Price/etc.) is left to the site; clicking
+  // ours flips sortMode and re-closes the dropdown.
   function findSortSelectRoot() {
     const label = [...document.querySelectorAll('label')].find(e => e.textContent.trim() === 'Sort');
     return label ? label.closest('.mantine-Select-root') : null;
@@ -1275,9 +1196,8 @@
     nativeOptions.forEach(o => {
       if (active) { o.removeAttribute('data-checked'); o.setAttribute('aria-selected', 'false'); }
     });
-    // Same reasoning as the Category dropdown's "Pricedata Value" entry below: it's appended
-    // after every real option, so on reopen it can sit below the fold with no automatic
-    // scroll bringing it into view the way Mantine does for its own options.
+    // Appended after every real option, so on reopen it can sit below the fold with no
+    // automatic scroll bringing it into view the way Mantine does for its own options.
     if (active) custom.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
@@ -1298,11 +1218,11 @@
     return null;
   }
 
-  // No longer auto-fetches (see getCachedTotals/triggerTotalsCalculation above) — a full
-  // inventory or storage-unit scan only ever runs from an explicit click now, to avoid
-  // hammering the site's API (and getting rate-limited) just from having the page open.
-  // Three states: a fresh cached/persisted number (click to refresh), a scan in flight
-  // ("calculating…"), or nothing yet (click prompt).
+  // This function itself never fetches — it only renders whatever's already in totalsCache/
+  // localStorage. An inventory scan only ever starts from an explicit click; a storage-unit
+  // scan can also auto-start (see autoScanStorageUnitIfNeeded) once per visit. Three states:
+  // a fresh cached/persisted number (click to refresh), a scan in flight ("calculating…"), or
+  // nothing yet (click prompt).
   let inlineTotalEl = null;
   function renderInlineTotal() {
     const ctx = currentContext();
@@ -1332,21 +1252,17 @@
   }
 
   // ---------- /leaderboard page: Pricedata leaderboard as its own separate link ----------
-  // Per explicit instruction, this is no longer folded into the native Category dropdown as
-  // an extra option — instead there's a button on /leaderboard that navigates to a distinct
-  // URL (a #pricedata hash on the same page, so it's a real bookmarkable/shareable link and
-  // the browser back button works) which shows a copy of the SAME podium+table format the
-  // native leaderboard uses, just backed by our own data.
+  // A button on /leaderboard navigates to a #pricedata hash on the same page (bookmarkable,
+  // back-button-friendly) showing a copy of the same podium+table format the native leaderboard
+  // uses, backed by our own data.
   //
-  // Earlier version mutated the SITE's own live podium/table nodes in place. That broke on
-  // click: mutating textContent/img.src only changes what's displayed — it never touches
-  // React's actual props for those nodes, so any click handler React still owns kept
-  // referencing whichever real player was there before we overwrote it, navigating to a
-  // stale/wrong profile. Fix: clone the podium Group and the table wholesale (cloneNode does
-  // NOT copy React's internal fiber/prop references or any addEventListener-bound handlers —
-  // only real DOM attributes), hide the live originals (and the Category select itself, while
-  // our view is up, so changing it can't leave stale content showing), and populate the
-  // detached clones instead. Same exact styling, zero stale bindings.
+  // Mutating the site's live podium/table nodes in place (an earlier approach) broke on click:
+  // changing textContent/img.src doesn't touch React's props, so click handlers kept referencing
+  // whichever player was originally there, navigating to a stale/wrong profile. Fix: clone the
+  // podium Group and the table wholesale (cloneNode does not copy React's internal fiber/prop
+  // references or any addEventListener-bound handlers), hide the live originals (and the
+  // Category select, so changing it can't leave stale content showing), and populate the
+  // detached clones instead. Same styling, zero stale bindings.
   const PRICEDATA_LEADERBOARD_HASH = '#pricedata';
   let leaderboardActive = false;
   let leaderboardOverlay = null; // { liveGroup, liveTable, cloneGroup, cloneTable, cloneTbody, rowTemplate, categoryRoot }
@@ -1411,15 +1327,13 @@
   }
 
   // Finds the live podium Group + table, clones both, hides the live ones (plus the Category
-  // select, so it can't be changed to show stale content underneath), and inserts the clones
-  // in the exact same spot — so layout/position/styling stay pixel-identical while the clones
-  // themselves carry no React bindings to go stale.
+  // select), and inserts the clones in the exact same spot — so layout/position/styling stay
+  // pixel-identical while the clones themselves carry no React bindings to go stale.
   function showCustomLeaderboardClone() {
     hideCustomLeaderboard();
-    // .mantine-Stack-root and .mantine-Group-root are generic Mantine layout primitives used
-    // all over this page (chat messages, the profile widget, etc. — 60+ of each), so the
-    // podium can only be reliably identified as the one Group whose DIRECT children are
-    // exactly the three podium Stacks (verified live: exactly one such match on this page).
+    // .mantine-Group-root is a generic Mantine layout primitive used all over this page (chat
+    // messages, the profile widget, etc.), so the podium can only be reliably identified as the
+    // one Group whose direct children are exactly the three podium Stacks.
     const group = [...document.querySelectorAll('.mantine-Group-root')].find(g =>
       [...g.children].filter(c => c.classList.contains('mantine-Stack-root')).length === 3
     );
@@ -1455,12 +1369,10 @@
     leaderboardOverlay = null;
   }
 
-  // Sets an avatar <img>'s src with a plain fallback on load failure — some submitted avatar
-  // URLs (e.g. a Tenor GIF someone set as their case-clicker profile picture) get region/
-  // hotlink-blocked and render as a "Content not viewable in your region" placeholder image
-  // instead of erroring cleanly. This is a site-wide quirk (the native leaderboard shows the
-  // exact same broken image for those users), not something introduced here — but we can at
-  // least fall back to a blank avatar instead of showing that placeholder ourselves.
+  // Some avatar URLs (e.g. hotlink-blocked GIFs) render a "not viewable in your region"
+  // placeholder instead of erroring cleanly — a site-wide quirk, not something introduced
+  // here (the native leaderboard shows the same broken image for those users). Fall back to
+  // a blank avatar instead of showing that placeholder.
   function setAvatarSrc(img, url) {
     if (!img) return;
     if (!url) { img.removeAttribute('src'); return; }
@@ -1468,10 +1380,9 @@
     img.src = url;
   }
 
-  // cloneNode(true) copies markup only — none of React's click handlers survive, which is why
-  // clicking a user on this cloned leaderboard has never done anything (confirmed live: this
-  // is equally true of the site's own native categories right now, not something we broke).
-  // Profile URLs are plain /profile/<userId> (confirmed live), so wire up real navigation by
+  // cloneNode(true) copies markup only — none of React's click handlers survive, so clicking
+  // a user on this cloned leaderboard does nothing by default (true of the site's own native
+  // categories too). Profile URLs are plain /profile/<userId>, so wire up real navigation by
   // hand on both the podium and the table rows.
   function makeClickable(el, userId) {
     if (!el || !userId) return;
@@ -1496,9 +1407,8 @@
       const avatarImg = stack.querySelector('img.mantine-Avatar-image');
       if (!entry) { texts.forEach(p => { p.textContent = '—'; }); setAvatarSrc(avatarImg, null); return; }
       if (texts[0]) texts[0].textContent = entry.username || 'Unknown';
-      // texts[1] (the big yellow-bar number) is left untouched — it's the account's XP, not
-      // a per-category value, and Premier rating didn't belong there either (removed per
-      // explicit instruction — it read as wrong/confusing next to a $ total).
+      // texts[1] (the big yellow-bar number) is the account's XP, not a per-category value —
+      // left untouched.
       if (texts[2]) texts[2].textContent = fmtFull(entry.totalValue);
       setAvatarSrc(avatarImg, entry.avatarUrl);
       makeClickable(stack, entry.userId);
@@ -1516,7 +1426,7 @@
         if (nameP) nameP.textContent = entry.username || 'Unknown';
         else tds[1].textContent = entry.username || 'Unknown';
       }
-      // tds[3] (the big yellow-bar number) is left untouched — see the podium comment above.
+      // tds[3] (the big yellow-bar number): same as the podium above, left untouched.
       if (tds[4]) tds[4].textContent = fmtFull(entry.totalValue);
       makeClickable(tr, entry.userId);
       cloneTbody.appendChild(tr);
@@ -1535,12 +1445,11 @@
   }
 
   // ---------- Bulk include/exclude (Select All / Deselect All) ----------
-  // Sits directly below the native Search box on storage-unit pages (Search lives alone in
+  // Inserted directly below the native Search box on storage-unit pages (Search lives alone in
   // its own single-column Grid row there, an easy anchor to insert after). Operates on every
-  // item in the WHOLE unit — fetches every page via fetchAllSkins rather than just the
-  // current page — since that's the same "one unit" scanAll/triggerTotalsCalculation already
-  // treat as a single total; a per-page-only toggle would silently leave other pages' items
-  // in whatever state they were already in.
+  // item in the WHOLE unit — fetches every page via fetchAllSkins rather than just the current
+  // page — since scanAll/triggerTotalsCalculation already treat a unit as one total; a
+  // per-page-only toggle would silently leave other pages' items in whatever state they were in.
   async function setAllIncluded(ctx, included) {
     const skins = await fetchAllSkins(ctx);
     skins.forEach(s => { if (s && s._id) { if (included) excludedIds.delete(s._id); else excludedIds.add(s._id); } });
@@ -1613,13 +1522,12 @@
   // driving scheduleTick() elsewhere would never see it otherwise.
   window.addEventListener('hashchange', scheduleTick);
 
-  // Auto-scan once per storage-unit visit. Inventory intentionally stays click-only (per
-  // explicit prior instruction — inventories can be large and this is what caused the
-  // rate-limit problems this whole cache system was built to fix), but storage units are
-  // opened one at a time and a single SU's scan is a much smaller, already-throttled request
-  // burst (see fetchAllSkins' FETCH_DELAY_MS), so it's safe to fire automatically on open
-  // rather than making every SU visit start with a manual click. Keyed by su id so navigating
-  // between different storage units re-triggers, but repeat ticks on the SAME one don't.
+  // Auto-scan once per storage-unit visit — the one exception to "scans are click-only".
+  // Inventory stays click-only since it can be large enough to risk the same rate-limit
+  // problems this cache system exists to avoid; a single SU's scan is smaller and already
+  // throttled (see FETCH_DELAY_MS). This is called from every tick (i.e. on every DOM mutation
+  // while on an SU page) — autoScannedSuKey is the only thing stopping that from becoming a
+  // fetch storm. Do not remove this guard on the assumption that fetches only happen on click.
   let autoScannedSuKey = null;
   function autoScanStorageUnitIfNeeded(ctx) {
     const key = 'su:' + ctx.id;
@@ -1633,10 +1541,10 @@
   function tick() {
     const ctx = currentContext();
     const cards = document.querySelectorAll('.mantine-Card-root');
-    // Only the real /inventory and storage-unit list pages have a Sort dropdown our
-    // takeover can actually drive. Elsewhere (e.g. the trade page's "Add skins to trade"
-    // modal, which has its own unrelated "Sort" control) hijacking it just showed a fake
-    // "Pricedata" label that didn't sort anything, and reloaded the whole page on click.
+    // Only the real /inventory and storage-unit list pages have a Sort dropdown our takeover
+    // can actually drive. Elsewhere (e.g. the trade page's "Add skins to trade" modal, which
+    // has its own unrelated "Sort" control) hijacking it just showed a fake "Pricedata" label
+    // that didn't sort anything, and reloaded the whole page on click.
     if (ctx) {
       if (cards.length && cards.length !== nativePageSkins.length) primeCurrentPage();
       hookSortDropdown();
@@ -1644,9 +1552,9 @@
       updateCardPrices();
     }
     updateExtraCardPrices();
-    // renderInlineTotal() is now a plain (synchronous, non-fetching) render — it shows
-    // whatever's already cached/persisted, or a click prompt if nothing's been calculated
-    // yet. The actual scan (fetchAllSkins) only runs from that click now, not from every tick.
+    // renderInlineTotal() itself only renders cached/persisted state, no fetch. But
+    // autoScanStorageUnitIfNeeded() right below DOES fetch from here, on every tick, while on
+    // an SU page — its own dedupe guard (not this comment) is what keeps that to once per visit.
     renderInlineTotal();
     if (ctx && ctx.type === 'inv') injectScanButton();
     if (ctx && ctx.type === 'su') autoScanStorageUnitIfNeeded(ctx);
@@ -1656,13 +1564,10 @@
 
   // ---------- Bootstrap ----------
   function init() {
-    // Observing document.body meant ANY DOM mutation anywhere on the page scheduled a tick —
-    // including every single Global Chat message arriving, since chat lives in its own
-    // <aside>/complementary panel that's a SIBLING of <main>, not inside it. The 50ms debounce
-    // in scheduleTick() kept this from being catastrophic, but an active chat still meant
-    // near-constant re-querying of the DOM for work that's only ever relevant inside <main>
-    // (cards, totals, buttons, etc.). Scoping the observer to <main> alone means chat activity
-    // no longer triggers a tick at all (flagged by zhiro — thanks!).
+    // Chat lives in its own <aside>/complementary panel, a SIBLING of <main> — observing
+    // document.body scheduled a tick on every single DOM mutation anywhere on the page,
+    // including every Global Chat message arriving. Scoping to <main> means chat activity
+    // (and anything else outside <main>) no longer triggers a tick at all.
     const observeRoot = document.querySelector('main') || document.body;
     const observer = new MutationObserver(() => {
       scheduleTick();
