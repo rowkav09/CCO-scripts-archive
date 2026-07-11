@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.2
+// @version      5.3
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -579,10 +579,22 @@
     return { calc, native, count: skins.length, includedCount };
   }
 
+  // Persists both the in-memory totalsCache and the localStorage-backed cache for a given
+  // key, exactly like triggerTotalsCalculation() already does for whichever single page
+  // you're currently viewing — scanAll uses the same two caches so a full scan updates the
+  // stored value for EVERY storage unit (and inventory), not just whichever one is on screen.
+  // This is what lets the scan menu (and the inline per-page total) show a fresh number for
+  // any unit without re-fetching it.
+  function cacheTotal(key, calc, native) {
+    totalsCache.set(key, { calc, native, ts: Date.now(), pending: false });
+    savePersistedTotals(key, calc, native);
+  }
+
   async function scanAll(onProgress) {
     onProgress && onProgress('Scanning inventory…');
     const invSkins = await fetchAllSkins({ type: 'inv' });
     const inv = sumSkins(invSkins);
+    cacheTotal('inv', inv.calc, inv.native);
 
     const sus = await fetchStorageUnitsList();
     const suResults = [];
@@ -590,13 +602,16 @@
       const su = sus[i];
       onProgress && onProgress(`Scanning storage unit ${i + 1}/${sus.length}: ${su.name || su._id}…`);
       const skins = await fetchAllSkins({ type: 'su', id: su._id });
-      suResults.push(Object.assign({ id: su._id, name: su.name || '(unnamed)' }, sumSkins(skins)));
+      const result = Object.assign({ id: su._id, name: su.name || '(unnamed)' }, sumSkins(skins));
+      suResults.push(result);
+      cacheTotal('su:' + su._id, result.calc, result.native);
     }
 
     const grandCalc = inv.calc + suResults.reduce((s, r) => s + r.calc, 0);
     const grandNative = inv.native + suResults.reduce((s, r) => s + r.native, 0);
     onProgress && onProgress('Fetching Premier stats…');
     const premier = await fetchPremierStats();
+    renderInlineTotal(); // reflect the freshly-cached inventory total immediately, if we're on /inventory
     return { inv, sus: suResults, grandCalc, grandNative, premier };
   }
 
@@ -625,100 +640,6 @@
   // ON per explicit request — still an easy per-user opt-out via the modal's toggle.
   function lbSubmitEnabled() { return localStorage.getItem('cco_lbSubmitEnabled') !== 'false'; }
   function setLbSubmitEnabled(on) { localStorage.setItem('cco_lbSubmitEnabled', on ? 'true' : 'false'); }
-
-  function showScanResultsModal(results) {
-    const old = document.getElementById('cco-scan-modal');
-    if (old) old.remove();
-    const overlay = document.createElement('div');
-    overlay.id = 'cco-scan-modal';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100000;' +
-      'display:flex;align-items:center;justify-content:center;';
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-
-    const panel = document.createElement('div');
-    panel.style.cssText = 'background:#1a1a1e;border:1px solid #f60;border-radius:8px;padding:20px 24px;' +
-      'max-width:480px;width:90%;max-height:80vh;overflow:auto;color:#fff;font-size:14px;font-family:inherit;';
-
-    const rowsHtml = results.sus.map(su => `
-      <div style="display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid #333;">
-        <span style="opacity:.9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(su.name)} (${su.includedCount}/${su.count})</span>
-        <span style="color:#f60;white-space:nowrap;">${fmtFull(su.calc)}</span>
-      </div>`).join('');
-
-    panel.innerHTML = `
-      <div style="font-size:18px;font-weight:600;margin-bottom:12px;">Full Scan Results</div>
-      <div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid #444;font-weight:600;">
-        <span>Inventory (${results.inv.includedCount}/${results.inv.count})</span>
-        <span style="color:#f60;">${fmtFull(results.inv.calc)}</span>
-      </div>
-      ${rowsHtml}
-      <div style="display:flex;justify-content:space-between;gap:12px;padding:10px 0 0;margin-top:8px;border-top:2px solid #f60;font-weight:700;font-size:15px;">
-        <span>Grand total (pricedata)</span><span style="color:#f60;">${fmtFull(results.grandCalc)}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0;opacity:.6;font-size:12px;">
-        <span>Grand total (native)</span><span>${fmtFull(results.grandNative)}</span>
-      </div>
-      ${results.premier && results.premier.premierRating != null ? `
-      <div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0 0;opacity:.75;font-size:12px;">
-        <span>Premier rating</span><span>${results.premier.premierRating.toLocaleString('en-US')}</span>
-      </div>` : ''}
-    `;
-
-    // Leaderboard opt-in row. Only shown once you've actually configured an API base — no
-    // point offering a toggle that has nowhere to send data.
-    if (CONFIG.LEADERBOARD_API_BASE) {
-      const lbRow = document.createElement('div');
-      lbRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;' +
-        'padding:10px 0 0;margin-top:10px;border-top:1px solid #444;';
-      const label = document.createElement('div');
-      label.innerHTML = '<div>Submit to Leaderboard</div>' +
-        '<div style="opacity:.6;font-size:11px;">Shares your name, avatar, and this total publicly</div>';
-      const toggle = document.createElement('div');
-      toggle.style.cssText = 'width:40px;height:22px;border-radius:11px;cursor:pointer;flex-shrink:0;' +
-        'border:2px solid #f60;box-sizing:border-box;position:relative;transition:background .15s;';
-      const knob = document.createElement('div');
-      knob.style.cssText = 'width:14px;height:14px;border-radius:50%;background:#f60;position:absolute;' +
-        'top:2px;left:2px;transition:left .15s;';
-      toggle.appendChild(knob);
-      const status = document.createElement('div');
-      status.style.cssText = 'font-size:11px;opacity:.7;margin-top:6px;text-align:right;';
-
-      function paint(on) {
-        knob.style.left = on ? '20px' : '2px';
-        toggle.style.background = on ? 'rgba(255,102,0,.3)' : 'transparent';
-      }
-
-      async function doSubmit() {
-        status.textContent = 'Submitting…';
-        await submitToLeaderboard(results.grandCalc, results.grandNative, results.premier);
-        if (lbSubmitEnabled()) status.textContent = 'Submitted ✓';
-      }
-
-      paint(lbSubmitEnabled());
-      if (lbSubmitEnabled()) doSubmit(); // already opted in from a previous scan — submit this run's fresh total too
-
-      toggle.addEventListener('click', () => {
-        const next = !lbSubmitEnabled();
-        setLbSubmitEnabled(next);
-        paint(next);
-        if (next) doSubmit(); else status.textContent = '';
-      });
-
-      lbRow.appendChild(label);
-      lbRow.appendChild(toggle);
-      panel.appendChild(lbRow);
-      panel.appendChild(status);
-    }
-
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = 'Close';
-    closeBtn.style.cssText = 'margin-top:16px;background:#f60;color:#000;border:none;border-radius:4px;' +
-      'padding:8px 16px;cursor:pointer;font-weight:600;';
-    closeBtn.addEventListener('click', () => overlay.remove());
-    panel.appendChild(closeBtn);
-    overlay.appendChild(panel);
-    document.body.appendChild(overlay);
-  }
 
   // Swaps a cloned button's visible label without touching its icon — walks to the first
   // text node that isn't inside the icon <svg>, so it works regardless of whether the label
@@ -790,74 +711,238 @@
     }
   }
 
-  const SCAN_BTN_LABEL = 'Scan All (Inventory + Storage Units)';
   let scanning = false;
-  async function onScanButtonClick(e) {
-    if (scanning) return;
-    scanning = true;
-    const btn = e.currentTarget;
-    try {
-      const results = await scanAll((msg) => setButtonLabel(btn, msg));
-      showScanResultsModal(results); // leaderboard submission is opt-in via the modal's own toggle
-    } catch (err) {
-      console.error('[cco-pricedata] scan failed', err);
-    } finally {
-      setButtonLabel(btn, SCAN_BTN_LABEL);
-      scanning = false;
+
+  // ---------- Scan menu (replaces the old immediate-scan + results-modal flow) ----------
+  // Opens as a dropdown panel below the button instead of blocking on a full scan. Shows
+  // whatever's already cached locally (loadPersistedTotals — the same localStorage cache the
+  // inline per-page total uses) for inventory and every storage unit immediately, lets you
+  // trigger a fresh Scan All from inside the menu with live progress, toggle leaderboard
+  // submission, and click any storage unit row to open it.
+  let scanMenuEl = null;
+  let scanMenuBtn = null;
+
+  function closeScanMenu() {
+    if (scanMenuEl) { scanMenuEl.remove(); scanMenuEl = null; }
+    document.removeEventListener('click', onScanMenuOutsideClick, true);
+  }
+
+  function onScanMenuOutsideClick(e) {
+    if (scanMenuEl && !scanMenuEl.contains(e.target) && scanMenuBtn && !scanMenuBtn.contains(e.target)) {
+      closeScanMenu();
     }
+  }
+
+  function fmtCachedValue(key) {
+    const persisted = loadPersistedTotals(key);
+    return persisted ? fmtFull(persisted.calc) : 'Not scanned yet';
+  }
+
+  function buildScanMenuRow(label, valueText, onClick) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;' +
+      'padding:7px 2px;border-bottom:1px solid #333;font-size:13px;';
+    if (onClick) {
+      row.style.cursor = 'pointer';
+      row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,102,0,.08)'; });
+      row.addEventListener('mouseleave', () => { row.style.background = ''; });
+      row.addEventListener('click', onClick);
+    }
+    const nameSpan = document.createElement('span');
+    nameSpan.style.cssText = 'opacity:.9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    nameSpan.textContent = label;
+    const valueSpan = document.createElement('span');
+    valueSpan.style.cssText = 'color:#f60;white-space:nowrap;flex-shrink:0;';
+    valueSpan.textContent = valueText;
+    row.appendChild(nameSpan);
+    row.appendChild(valueSpan);
+    return row;
+  }
+
+  // (Re)populates the storage-unit list from whatever's cached locally right now — called on
+  // open, and again after a scan completes so the fresh totals show immediately.
+  async function refreshScanMenuStorageUnits() {
+    const listEl = scanMenuEl && scanMenuEl.querySelector('#cco-scan-menu-su-list');
+    if (!listEl) return;
+    const sus = await fetchStorageUnitsList();
+    listEl.innerHTML = '';
+    if (!sus.length) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:8px 2px;opacity:.6;font-size:12px;';
+      empty.textContent = 'No storage units.';
+      listEl.appendChild(empty);
+      return;
+    }
+    sus.forEach(su => {
+      const row = buildScanMenuRow(su.name || '(unnamed)', fmtCachedValue('su:' + su._id), () => {
+        window.location.href = '/inventory/storageUnits/' + su._id;
+      });
+      listEl.appendChild(row);
+    });
+  }
+
+  async function openScanMenu(btn) {
+    closeScanMenu();
+    scanMenuBtn = btn;
+
+    const panel = document.createElement('div');
+    panel.id = 'cco-scan-menu';
+    panel.style.cssText = 'background:#1a1a1e;border:1px solid #f60;border-radius:8px;padding:14px 16px;' +
+      'max-width:420px;width:100%;max-height:70vh;overflow:auto;color:#fff;font-size:14px;font-family:inherit;' +
+      'margin-top:8px;box-shadow:0 4px 16px rgba(0,0,0,.5);';
+    panel.addEventListener('click', (e) => e.stopPropagation());
+
+    const title = document.createElement('div');
+    title.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:8px;';
+    title.textContent = 'Pricedata Scan';
+    panel.appendChild(title);
+
+    // Cached (last-scanned) inventory total, shown instantly — no fetch needed to open this.
+    const invRow = buildScanMenuRow('Inventory', fmtCachedValue('inv'));
+    invRow.style.fontWeight = '600';
+    invRow.style.borderBottom = '1px solid #444';
+    panel.appendChild(invRow);
+
+    const suListEl = document.createElement('div');
+    suListEl.id = 'cco-scan-menu-su-list';
+    suListEl.style.cssText = 'margin-top:2px;';
+    panel.appendChild(suListEl);
+
+    // Leaderboard opt-in toggle — always visible here now (previously only shown in the
+    // post-scan modal, so there was no way to see/change it without running a scan first).
+    if (CONFIG.LEADERBOARD_API_BASE) {
+      const lbRow = document.createElement('div');
+      lbRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:12px;' +
+        'padding:10px 0 0;margin-top:10px;border-top:1px solid #444;';
+      const label = document.createElement('div');
+      label.innerHTML = '<div>Submit to Leaderboard</div>' +
+        '<div style="opacity:.6;font-size:11px;">Shares your name, avatar, and total publicly</div>';
+      const toggle = document.createElement('div');
+      toggle.style.cssText = 'width:40px;height:22px;border-radius:11px;cursor:pointer;flex-shrink:0;' +
+        'border:2px solid #f60;box-sizing:border-box;position:relative;transition:background .15s;';
+      const knob = document.createElement('div');
+      knob.style.cssText = 'width:14px;height:14px;border-radius:50%;background:#f60;position:absolute;' +
+        'top:2px;left:2px;transition:left .15s;';
+      toggle.appendChild(knob);
+      const paint = (on) => {
+        knob.style.left = on ? '20px' : '2px';
+        toggle.style.background = on ? 'rgba(255,102,0,.3)' : 'transparent';
+      };
+      paint(lbSubmitEnabled());
+      toggle.addEventListener('click', () => {
+        const next = !lbSubmitEnabled();
+        setLbSubmitEnabled(next);
+        paint(next);
+      });
+      lbRow.appendChild(label);
+      lbRow.appendChild(toggle);
+      panel.appendChild(lbRow);
+    }
+
+    const scanRow = document.createElement('div');
+    scanRow.style.cssText = 'display:flex;align-items:center;gap:10px;margin-top:12px;';
+    const scanBtn = document.createElement('button');
+    scanBtn.textContent = 'Scan All';
+    scanBtn.style.cssText = 'background:#f60;color:#000;border:none;border-radius:4px;' +
+      'padding:8px 14px;cursor:pointer;font-weight:600;font-size:13px;';
+    const statusEl = document.createElement('span');
+    statusEl.style.cssText = 'font-size:12px;opacity:.75;';
+    scanRow.appendChild(scanBtn);
+    scanRow.appendChild(statusEl);
+    panel.appendChild(scanRow);
+
+    const footer = document.createElement('div');
+    footer.style.cssText = 'margin-top:12px;padding-top:8px;border-top:1px solid #333;text-align:right;';
+    const updateLink = document.createElement('a');
+    updateLink.textContent = 'Check for script updates';
+    updateLink.href = 'javascript:void(0)';
+    updateLink.style.cssText = 'color:#f60;font-size:11px;opacity:.75;text-decoration:none;cursor:pointer;';
+    updateLink.addEventListener('click', () => onUpdateButtonClick());
+    footer.appendChild(updateLink);
+    panel.appendChild(footer);
+
+    scanMenuEl = panel;
+    btn.closest('.mantine-Grid-root').insertAdjacentElement('afterend', panel);
+    setTimeout(() => document.addEventListener('click', onScanMenuOutsideClick, true), 0);
+
+    refreshScanMenuStorageUnits();
+
+    scanBtn.addEventListener('click', async () => {
+      if (scanning) return;
+      scanning = true;
+      scanBtn.disabled = true;
+      try {
+        const results = await scanAll((msg) => { statusEl.textContent = msg; });
+        invRow.querySelector('span:last-child').textContent = fmtFull(results.inv.calc);
+        await refreshScanMenuStorageUnits();
+        statusEl.textContent = `Done — grand total ${fmtFull(results.grandCalc)}`;
+        if (lbSubmitEnabled()) {
+          statusEl.textContent += ' — submitting to leaderboard…';
+          await submitToLeaderboard(results.grandCalc, results.grandNative, results.premier);
+          statusEl.textContent = `Done — grand total ${fmtFull(results.grandCalc)} (submitted ✓)`;
+        }
+      } catch (err) {
+        console.error('[cco-pricedata] scan failed', err);
+        statusEl.textContent = 'Scan failed — see console.';
+      } finally {
+        scanBtn.disabled = false;
+        scanning = false;
+      }
+    });
+  }
+
+  function toggleScanMenu(btn) {
+    if (scanMenuEl) { closeScanMenu(); return; }
+    openScanMenu(btn);
   }
 
   // Opens the raw @updateURL in a new tab. Tampermonkey intercepts .user.js URLs itself and,
   // if a script with the same @namespace/@name is already installed, shows its own "Update"
   // (rather than "Install") prompt when the remote @version is newer — confirmed live, this
   // is exactly what happens navigating to raw.githubusercontent.com/.../*.user.js. So this
-  // button is a real manual "check now" trigger, not just a link to the source.
+  // link is a real manual "check now" trigger, not just a link to the source.
   function onUpdateButtonClick() {
     window.open('https://raw.githubusercontent.com/rowkav09/CCO-scripts-archive/main/scripts/Utilities/Case%20Clicker%20Pricedata%20Overlay-2.7.user.js', '_blank');
   }
 
-  // Cloning the existing button row (Float Rank Management / Custom Sell / Storage Units /
-  // Special Effects) keeps identical Mantine classes, so our buttons match the site's own
-  // look exactly without having to hand-reconstruct it. Kept at 2 columns (Scan All + Update
-  // Script) instead of collapsing to 1.
+  // Cloning one of the native columns (Float Rank Management / Custom Sell / Storage Units /
+  // Special Effects) and appending it into the SAME row — rather than the old approach of
+  // cloning the whole row into a second row underneath — keeps identical Mantine classes and
+  // puts everything in one bar, per explicit request. All columns (native + ours) are then
+  // force-resized to an even share so the row still fits. Re-run every tick (cheap, and
+  // self-healing if the site ever re-renders this row and drops our appended column).
   function injectScanButton() {
-    if (document.getElementById('cco-scan-row')) return;
     const srcBtn = [...document.querySelectorAll('button')].find(b => /Float Rank Management|Storage Units|Special Effects|Custom Sell/.test(b.textContent));
     if (!srcBtn) return;
     const gridRoot = srcBtn.closest('.mantine-Grid-root');
     const inner = gridRoot && gridRoot.querySelector('.mantine-Grid-inner');
     if (!gridRoot || !inner) return;
 
-    const newRow = gridRoot.cloneNode(true);
-    newRow.id = 'cco-scan-row';
-    newRow.style.marginTop = '8px';
-    const cols = [...newRow.querySelectorAll('.mantine-Grid-col')];
-    cols.forEach((c, i) => { if (i > 1) c.remove(); });
-    if (cols[1]) {
-      cols[0].style.flex = '1 1 70%';
-      cols[0].style.maxWidth = '70%';
-      cols[1].style.flex = '1 1 30%';
-      cols[1].style.maxWidth = '30%';
-    } else {
-      cols[0].style.flex = '1 1 100%';
-      cols[0].style.maxWidth = '100%';
+    let scanCol = inner.querySelector('[data-cco-scan-col]');
+    if (!scanCol) {
+      const template = inner.querySelector('.mantine-Grid-col');
+      if (!template) return;
+      scanCol = template.cloneNode(true);
+      scanCol.dataset.ccoScanCol = '1';
+      const btn = scanCol.querySelector('button');
+      btn.removeAttribute('id');
+      btn.style.width = '100%';
+      setButtonLabel(btn, 'Pricedata Scan');
+      btn.addEventListener('click', (e) => { e.stopPropagation(); toggleScanMenu(btn); });
+      inner.appendChild(scanCol);
     }
 
-    const scanBtn = cols[0].querySelector('button');
-    scanBtn.removeAttribute('id');
-    scanBtn.style.width = '100%';
-    setButtonLabel(scanBtn, SCAN_BTN_LABEL);
-    scanBtn.addEventListener('click', onScanButtonClick);
+    // Evenly distribute width across every real column in the row (native + ours) so it all
+    // fits as one bar instead of overflowing or wrapping onto a second line.
+    const allCols = [...inner.querySelectorAll('.mantine-Grid-col')];
+    const pct = (100 / allCols.length).toFixed(4) + '%';
+    allCols.forEach(c => { c.style.flex = `1 1 ${pct}`; c.style.maxWidth = pct; });
 
-    if (cols[1]) {
-      const updateBtn = cols[1].querySelector('button');
-      updateBtn.removeAttribute('id');
-      updateBtn.style.width = '100%';
-      setButtonLabel(updateBtn, 'Update Script');
-      updateBtn.addEventListener('click', onUpdateButtonClick);
+    // If the scan menu is open, keep it anchored right after this row — a re-render of the
+    // row could otherwise leave the menu orphaned next to a stale/detached node.
+    if (scanMenuEl && scanMenuEl.previousElementSibling !== gridRoot) {
+      gridRoot.insertAdjacentElement('afterend', scanMenuEl);
     }
-
-    gridRoot.insertAdjacentElement('afterend', newRow);
   }
 
   // ---------- Current-page skin capture ----------
