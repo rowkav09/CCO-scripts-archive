@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.8
+// @version      5.9
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -516,16 +516,34 @@
   }
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+  // Retries a fetch a couple of times (short backoff) before giving up. A scan over many pages
+  // means many sequential requests; one dropped connection or transient 5xx used to throw
+  // straight out of fetchAllSkins (TypeError: Failed to fetch) and abort the entire scan.
+  async function fetchWithRetry(url, options, retries = 2, delayMs = 500) {
+    let lastErr;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const res = await origFetch(url, options);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res;
+      } catch (e) {
+        lastErr = e;
+        if (attempt < retries) await sleep(delayMs * (attempt + 1));
+      }
+    }
+    throw lastErr;
+  }
+
   // Sequential with a delay between requests — fetching all pages at once (Promise.all) trips
   // the site's rate limiter on large inventories/storage units. Shared by inventory + SU scans.
   async function fetchAllSkins(ctx, onProgress) {
-    const first = await origFetch(listUrlFor(ctx, 1), { credentials: 'include' }).then(r => r.json());
+    const first = await fetchWithRetry(listUrlFor(ctx, 1), { credentials: 'include' }).then(r => r.json());
     const pages = first.pages || 1;
     const all = [...(first.skins || [])];
     onProgress && onProgress(1, pages);
     for (let p = 2; p <= pages; p++) {
       await sleep(CONFIG.FETCH_DELAY_MS);
-      const d = await origFetch(listUrlFor(ctx, p), { credentials: 'include' }).then(r => r.json());
+      const d = await fetchWithRetry(listUrlFor(ctx, p), { credentials: 'include' }).then(r => r.json());
       all.push(...(d.skins || []));
       onProgress && onProgress(p, pages);
     }
