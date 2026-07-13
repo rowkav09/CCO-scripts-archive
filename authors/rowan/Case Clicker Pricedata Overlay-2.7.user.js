@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.21
+// @version      5.22
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -427,6 +427,31 @@
   function updateCardPrices() {
     if (!currentPageSkins.length) return;
     const cards = document.querySelectorAll('.mantine-Card-root');
+
+    // Pricedata mode (no page reload — see the "Pricedata" sort option's click handler): the
+    // actual DOM cards are still in whatever order the site's own last real fetch rendered them
+    // in, only re-ordered visually via CSS `order` (see applySort). That means the old
+    // index-pairs-with-currentPageSkins assumption below no longer holds — match each card to
+    // its own skin by _id (read off its React fiber, same helper the trade/chat overlay uses)
+    // instead, or every card would silently show the wrong price/toggle.
+    if (sortMode === 'pricedata') {
+      const byId = new Map(currentPageSkins.map(s => [s._id, s]));
+      cards.forEach(card => {
+        const fiberSkin = getSkinFromCardFiber(card);
+        const skin = fiberSkin && fiberSkin._id != null ? byId.get(fiberSkin._id) : null;
+        if (!skin) return;
+        const badge = [...card.querySelectorAll('.mantine-Badge-label')].find(e => /^\$[\d,]+\.\d{2}$/.test(e.textContent.trim()));
+        if (badge) {
+          const { calc, native } = calcPrice(skin);
+          const calcText = fmtFull(calc);
+          if (badge.textContent.trim() !== calcText) badge.textContent = calcText;
+          if (!badge.dataset.ccoTooltip) { badge.dataset.ccoTooltip = '1'; attachTooltip(badge, () => `Native price: ${fmtFull(native)}`); }
+        }
+        injectIncludeToggle(card, skin);
+      });
+      return;
+    }
+
     if (cards.length !== currentPageSkins.length) return;
     cards.forEach((card, i) => {
       const skin = currentPageSkins[i];
@@ -1521,16 +1546,36 @@
   }
 
   // ---------- Sort (native / pricedata) ----------
-  // Sorting happens at the data layer: when "Pricedata" is active, the window.fetch patch
-  // above rewrites the actual server response to already be the correct globally-ranked
-  // slice, so cards render in true rank order via the site's own pipeline. No CSS reordering
-  // needed here — just mirror the (already-correct) page data and clear any leftover `order`
-  // from an older version of this script.
+  // Native mode: the window.fetch patch already rewrote the actual server response before React
+  // rendered it (only applies to a real reload/navigation, which native sort changes always
+  // trigger), so cards are already in the right order — just clear any leftover `order` from a
+  // previous Pricedata session.
+  //
+  // Pricedata mode used to rely on the same rewrite-before-render trick, which only works if a
+  // genuine network fetch happens — the "Pricedata" option's click handler used to force that by
+  // calling location.reload(), which worked but reset scroll position and felt jarring compared
+  // to every other sort option (which just re-renders in place, no reload). Now that click just
+  // calls primeCurrentPage() instead (no reload), so the DOM cards are still sitting in whatever
+  // order the site's own last real (native-sort) fetch put them in — this reorders them visually
+  // via CSS `order`, matched to nativePageSkins (the correctly-ranked slice) by skin _id read off
+  // each card's own React fiber, same helper the trade/chat overlay uses.
   function applySort() {
     const cards = [...document.querySelectorAll('.mantine-Card-root')];
     currentPageSkins = nativePageSkins.slice();
-    if (!cards.length || cards.length !== nativePageSkins.length) return;
-    cards.forEach(c => { if (c.parentElement.style.order) c.parentElement.style.order = ''; });
+    if (!cards.length) return;
+
+    if (sortMode !== 'pricedata') {
+      if (cards.length !== nativePageSkins.length) return;
+      cards.forEach(c => { if (c.parentElement.style.order) c.parentElement.style.order = ''; });
+      return;
+    }
+
+    const rankById = new Map(nativePageSkins.map((s, i) => [s._id, i]));
+    cards.forEach(card => {
+      const skin = getSkinFromCardFiber(card);
+      const rank = skin && skin._id != null ? rankById.get(skin._id) : undefined;
+      card.parentElement.style.order = rank != null ? String(rank) : '';
+    });
   }
 
   function setSortMode(mode) {
@@ -1587,11 +1632,14 @@
       custom.addEventListener('click', (e) => {
         e.stopPropagation();
         setSortMode('pricedata');
-        // The currently-displayed page was fetched under whatever native sort was active
-        // before; a reload forces the very first request to go through our fetch patch's
-        // Pricedata takeover (see window.fetch above), so it's correct immediately rather
-        // than only fixing itself on the next click/page-change.
-        location.reload();
+        // Used to be location.reload() — forced a genuine network request so the fetch patch's
+        // Pricedata takeover applied immediately, but a full page reload lost scroll position
+        // and felt jarring compared to every other sort option (which just re-renders in place).
+        // primeCurrentPage() fetches the correctly-ranked slice for the current page directly
+        // (no reload); applySort()/updateCardPrices() now reorder/reprice the existing cards via
+        // CSS `order` + fiber-matched skin _id instead of relying on the DOM already being in
+        // fetch order (see their comments).
+        primeCurrentPage();
       });
       dropdown.appendChild(custom);
     }
@@ -1968,6 +2016,7 @@
     if (ctx && ctx.type === 'su') autoScanStorageUnitIfNeeded(ctx);
     injectBulkIncludeToggle(); // no-ops (and cleans up) when not on a storage-unit page
     hookLeaderboardPage();
+    tryAttachChatObserver();
   }
 
   // Lightweight sibling of scheduleTick() — same debounce shape, but only runs the one thing
@@ -1987,6 +2036,26 @@
     }, 50);
   }
 
+  // Separate, narrow-purpose observer for the chat aside (see scheduleChatTick's comment) — this
+  // is what actually fixes "skin cards shared in Global Chat never get priced": the main observer
+  // in init() below never sees DOM changes here since <aside> isn't inside <main>.
+  //
+  // Attaching this only once at init() time (the original v5.20 approach) turned out to be
+  // fragile: if the chat aside hasn't mounted yet at document-idle (this is a client-rendered
+  // SPA — the shell can still be hydrating), document.querySelector found nothing and this
+  // silently never attached for the rest of the page's life, leaving the exact bug it was meant
+  // to fix. Calling this from every tick() instead (cheap — one querySelector, no-ops once
+  // already attached) makes it self-healing regardless of mount timing.
+  let chatObserverAttached = false;
+  function tryAttachChatObserver() {
+    if (chatObserverAttached) return;
+    const chatAside = document.querySelector('.mantine-AppShell-aside');
+    if (!chatAside) return;
+    chatObserverAttached = true;
+    const chatObserver = new MutationObserver(() => scheduleChatTick());
+    chatObserver.observe(chatAside, { childList: true, subtree: true });
+  }
+
   // ---------- Bootstrap ----------
   function init() {
     // Chat lives in its own <aside>/complementary panel, a SIBLING of <main> — observing
@@ -1999,15 +2068,7 @@
     });
     observer.observe(observeRoot, { childList: true, subtree: true });
 
-    // Separate, narrow-purpose observer for the chat aside (see scheduleChatTick's comment) —
-    // this is what actually fixes "skin cards shared in Global Chat never get priced": the main
-    // observer above never sees DOM changes here since <aside> isn't inside <main>.
-    const chatAside = document.querySelector('.mantine-AppShell-aside');
-    if (chatAside) {
-      const chatObserver = new MutationObserver(() => scheduleChatTick());
-      chatObserver.observe(chatAside, { childList: true, subtree: true });
-    }
-
+    tryAttachChatObserver();
     hydrateSheetDataFromCache();
     loadData();
     scheduleSheetRefresh();
