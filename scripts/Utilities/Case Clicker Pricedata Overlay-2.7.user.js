@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.30
+// @version      5.31
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -1641,10 +1641,18 @@
     }
 
     const rankById = new Map(nativePageSkins.map((s, i) => [s._id, i]));
+    // Cards that can't be fiber-matched to anything in nativePageSkins used to get `order = ''`
+    // (clearing the inline style), which falls back to CSS's default order of 0 — putting an
+    // UNMATCHED card at the very FRONT of the visual sort, ahead of every genuinely low-ranked
+    // but correctly-matched item. That's exactly what a user saw and reported: a real $7 item
+    // sitting between a $2,000,000 and a $700,000 card. Push anything we can't confidently rank
+    // to the very END instead, so a match failure can only ever look like a missing/skipped item,
+    // never a wrongly-promoted one.
+    const unmatchedOrder = nativePageSkins.length + 1000;
     cards.forEach(card => {
       const skin = getSkinCached(card);
       const rank = skin && skin._id != null ? rankById.get(skin._id) : undefined;
-      card.parentElement.style.order = rank != null ? String(rank) : '';
+      card.parentElement.style.order = rank != null ? String(rank) : String(unmatchedOrder);
     });
 
     // An earlier version of this tried to auto-detect a bad match rate and force a corrective
