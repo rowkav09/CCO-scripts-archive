@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.17
+// @version      5.18
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -545,14 +545,26 @@
 
   // Sequential with a delay between requests — fetching all pages at once (Promise.all) trips
   // the site's rate limiter on large inventories/storage units. Shared by inventory + SU scans.
-  async function fetchAllSkins(ctx, onProgress) {
-    const first = await fetchWithRetry(listUrlFor(ctx, 1), { credentials: 'include' }).then(r => r.json());
+  //
+  // forceSort: normally omitted, which makes listUrlFor fall back to whatever the page's own
+  // Sort dropdown currently shows — needed by getGlobalSorted/triggerTotalsCalculation so the
+  // fetched order matches the cards on screen. But sort=float / sort=rank silently return ZERO
+  // items for a storage unit that's all stickers (no floatRanks to sort by) instead of just
+  // reordering — confirmed via direct API calls (e.g. a 917-item all-sticker unit returned
+  // pages:0/count:0 for sort=float/rank, vs the full 917 for sort=''/'price'). That means
+  // scanAll() run from the main /inventory page while its Sort dropdown was set to Float/Float
+  // Ranks would silently zero out every sticker-only storage unit's total — exactly the "correct
+  // on the SU's own page, $0 from Scan All on the main page" bug. Callers that only care about a
+  // correct TOTAL (scanAll, setAllIncluded) must pass forceSort:'' to sidestep this entirely.
+  async function fetchAllSkins(ctx, onProgress, forceSort) {
+    const sortArg = forceSort !== undefined ? forceSort : undefined;
+    const first = await fetchWithRetry(listUrlFor(ctx, 1, sortArg), { credentials: 'include' }).then(r => r.json());
     const pages = first.pages || 1;
     const all = [...(first.skins || [])];
     onProgress && onProgress(1, pages);
     for (let p = 2; p <= pages; p++) {
       await sleep(CONFIG.FETCH_DELAY_MS);
-      const d = await fetchWithRetry(listUrlFor(ctx, p), { credentials: 'include' }).then(r => r.json());
+      const d = await fetchWithRetry(listUrlFor(ctx, p, sortArg), { credentials: 'include' }).then(r => r.json());
       all.push(...(d.skins || []));
       onProgress && onProgress(p, pages);
     }
@@ -713,7 +725,7 @@
 
   async function scanAll(onProgress) {
     onProgress && onProgress('Scanning inventory…');
-    const invSkins = await fetchAllSkins({ type: 'inv' });
+    const invSkins = await fetchAllSkins({ type: 'inv' }, null, '');
     const inv = sumSkins(invSkins);
     cacheTotal('inv', inv.calc, inv.native);
 
@@ -722,7 +734,7 @@
     for (let i = 0; i < sus.length; i++) {
       const su = sus[i];
       onProgress && onProgress(`Scanning storage unit ${i + 1}/${sus.length}: ${su.name || su._id}…`);
-      const skins = await fetchAllSkins({ type: 'su', id: su._id });
+      const skins = await fetchAllSkins({ type: 'su', id: su._id }, null, '');
       const result = Object.assign({ id: su._id, name: su.name || '(unnamed)' }, sumSkins(skins));
       suResults.push(result);
       cacheTotal('su:' + su._id, result.calc, result.native);
@@ -1826,7 +1838,7 @@
   // page — since scanAll/triggerTotalsCalculation already treat a unit as one total; a
   // per-page-only toggle would silently leave other pages' items in whatever state they were in.
   async function setAllIncluded(ctx, included) {
-    const skins = await fetchAllSkins(ctx);
+    const skins = await fetchAllSkins(ctx, null, '');
     skins.forEach(s => { if (s && s._id) { if (included) excludedIds.delete(s._id); else excludedIds.add(s._id); } });
     totalsCache.clear();
     scheduleTick();
