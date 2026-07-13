@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.10
+// @version      5.12
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -669,16 +669,29 @@
     }
   }
 
+  // Keeps `list` sorted descending by calc, capped at TOP_N entries — an efficient running
+  // top-N tracker so summing thousands of skins doesn't require sorting the whole inventory
+  // just to find the most valuable few.
+  const TOP_SKINS_N = 4;
+  function insertTopSkin(list, skin, calc) {
+    if (list.length < TOP_SKINS_N || calc > list[list.length - 1].calc) {
+      let i = list.length;
+      while (i > 0 && list[i - 1].calc < calc) i--;
+      list.splice(i, 0, { skin, calc });
+      if (list.length > TOP_SKINS_N) list.length = TOP_SKINS_N;
+    }
+  }
+
   function sumSkins(skins) {
     let calc = 0, native = 0, includedCount = 0;
-    let topSkin = null, topCalc = -Infinity;
+    const topSkins = []; // up to TOP_SKINS_N { skin, calc }, sorted descending
     skins.forEach(s => {
       if (!isIncluded(s._id)) return;
       const r = calcPrice(s);
       calc += r.calc; native += r.native; includedCount++;
-      if (r.calc > topCalc) { topCalc = r.calc; topSkin = s; }
+      insertTopSkin(topSkins, s, r.calc);
     });
-    return { calc, native, count: skins.length, includedCount, topSkin, topCalc: topSkin ? topCalc : null };
+    return { calc, native, count: skins.length, includedCount, topSkins };
   }
 
   // Writes both the in-memory totalsCache and the persisted localStorage cache for a key —
@@ -709,15 +722,19 @@
     const grandCalc = inv.calc + suResults.reduce((s, r) => s + r.calc, 0);
     const grandNative = inv.native + suResults.reduce((s, r) => s + r.native, 0);
 
-    // Single most valuable skin across inventory + every storage unit — for the "Most Valuable
-    // Skin" leaderboard, independent of the grand totals above.
-    let topSkin = inv.topSkin, topCalc = inv.topCalc == null ? -Infinity : inv.topCalc;
-    suResults.forEach(r => { if (r.topSkin && r.topCalc > topCalc) { topCalc = r.topCalc; topSkin = r.topSkin; } });
+    // Top 4 most valuable skins across inventory + every storage unit combined — for the
+    // "Most Valuable Skin" leaderboard, independent of the grand totals above. Each unit's own
+    // top-4 list is already small, so a plain sort+slice here is simpler than threading another
+    // insertTopSkin merge through every storage unit.
+    const topSkins = inv.topSkins
+      .concat(...suResults.map(r => r.topSkins))
+      .sort((a, b) => b.calc - a.calc)
+      .slice(0, TOP_SKINS_N);
 
     onProgress && onProgress('Fetching Premier stats…');
     const premier = await fetchPremierStats();
     renderInlineTotal(); // reflect the freshly-cached inventory total immediately, if we're on /inventory
-    return { inv, sus: suResults, grandCalc, grandNative, premier, topSkin, topSkinCalc: topSkin ? topCalc : null };
+    return { inv, sus: suResults, grandCalc, grandNative, premier, topSkins };
   }
 
   // Premier rank/rating live on /api/me (the game-stats endpoint) alongside money/xp/etc —
@@ -769,9 +786,11 @@
   //   GET  {LEADERBOARD_API_BASE}/api/leaderboard?limit=50
   //     -> { entries: [{ rank, userId, username, avatarUrl, totalValue, nativeValue, updatedAt }] }
   //   POST {LEADERBOARD_API_BASE}/api/submit-top-skin
-  //     body: { userId, username, avatarUrl, skinName, exterior, statTrak, souvenir, quality, value } -> { ok: true }
+  //     body: { userId, username, avatarUrl, skins: [{ skinName, exterior, statTrak, souvenir,
+  //             quality, value }, ...] }  (up to TOP_SKINS_N, most valuable first) -> { ok: true }
   //   GET  {LEADERBOARD_API_BASE}/api/top-skin-leaderboard?limit=50
   //     -> { entries: [{ rank, userId, username, avatarUrl, skinName, exterior, statTrak, souvenir, quality, value, updatedAt }] }
+  //     (ranked per-skin globally, not per-user — a single user can occupy multiple rows)
   // User identity isn't on /api/me (game stats only) — it lives on the auth session endpoint:
   // GET /api/auth/get-session -> { session, user: { id, name, image, ... } }.
   let meCache = null;
@@ -819,28 +838,34 @@
     }
   }
 
-  // Submits the single most valuable skin found during this scan — replaces whatever was
-  // stored before for this user, since it reflects current holdings, not a highest-ever record.
-  async function submitTopSkin(skin, calc) {
-    if (!CONFIG.LEADERBOARD_API_BASE || !skin) return;
+  // Submits up to the top 4 most valuable skins found during this scan (see TOP_SKINS_N) —
+  // fully replaces whatever this user had stored before across all 4 slots, since it reflects
+  // current holdings, not a highest-ever record. Each user can occupy up to 4 rows on the
+  // global "Most Valuable Skin" leaderboard this way, one per slot.
+  async function submitTopSkins(topSkins) {
+    if (!CONFIG.LEADERBOARD_API_BASE || !topSkins || !topSkins.length) return;
     try {
       const me = await getMe();
       const userId = me && me.id;
       if (!userId) return;
       const username = (me && me.name) || 'Unknown';
       const avatarUrl = (me && me.image) || null;
+      // skinId is the real openedSkin document id — the server independently looks this up
+      // against case-clicker.com's own public API and only accepts the slot if that skin is
+      // actually owned by userId, so a forged submission can't claim a skin someone doesn't have.
+      const skins = topSkins.slice(0, TOP_SKINS_N).map(({ skin, calc }) => ({
+        skinId: skin._id || null,
+        skinName: skin.name || 'Unknown Skin',
+        exterior: skin.exterior || '',
+        statTrak: !!skin.statTrak,
+        souvenir: !!skin.souvenir,
+        quality: typeof skin.quality === 'number' ? skin.quality : 0,
+        value: calc,
+      }));
       await origFetch(CONFIG.LEADERBOARD_API_BASE.replace(/\/$/, '') + '/api/submit-top-skin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CCO-Client': 'cco-overlay-v1' },
-        body: JSON.stringify({
-          userId, username, avatarUrl,
-          skinName: skin.name || 'Unknown Skin',
-          exterior: skin.exterior || '',
-          statTrak: !!skin.statTrak,
-          souvenir: !!skin.souvenir,
-          quality: typeof skin.quality === 'number' ? skin.quality : 0,
-          value: calc,
-        }),
+        body: JSON.stringify({ userId, username, avatarUrl, skins }),
       });
     } catch (e) {
       console.error('[cco-pricedata] top-skin submit failed', e);
@@ -873,9 +898,16 @@
 
   // Closing used to also happen on any click outside the panel, which made it disappear when
   // clicking the blank page background around it (now that there's a wide 3-column panel, that
-  // dead space is much bigger). Closing is now only ever explicit: the × button below, or
-  // clicking the Pricedata Scan button again (toggleScanMenu).
+  // dead space is much bigger). Closing is now explicit (the × button, or the Pricedata Scan
+  // button again via toggleScanMenu) or on page scroll (see onScanMenuScroll) — the panel is
+  // fixed/docked to the bottom of the screen now, so it no longer scrolls away with the page.
+  function onScanMenuScroll(e) {
+    if (scanMegaEl && e.target && e.target.nodeType === 1 && scanMegaEl.contains(e.target)) return;
+    closeScanMenu();
+  }
+
   function closeScanMenu() {
+    document.removeEventListener('scroll', onScanMenuScroll, true);
     if (scanMegaEl) { scanMegaEl.remove(); scanMegaEl = null; }
     scanMenuEl = null;
   }
@@ -1006,8 +1038,8 @@
   function buildLeaderboardColumn(title, fetchFn, mapEntry) {
     const col = document.createElement('div');
     col.style.cssText = 'background:#1a1a1e;border:1px solid #f60;border-radius:8px;padding:14px 16px;' +
-      'width:300px;flex-shrink:0;max-height:70vh;color:#fff;font-size:14px;font-family:inherit;' +
-      'box-shadow:0 4px 16px rgba(0,0,0,.5);display:flex;flex-direction:column;';
+      'flex:1 1 0;min-width:260px;max-width:560px;max-height:inherit;color:#fff;font-size:14px;font-family:inherit;' +
+      'box-shadow:0 4px 16px rgba(0,0,0,.5);display:flex;flex-direction:column;overflow:hidden;';
 
     const titleEl = document.createElement('div');
     titleEl.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:8px;flex-shrink:0;';
@@ -1085,7 +1117,7 @@
     const panel = document.createElement('div');
     panel.id = 'cco-scan-menu';
     panel.style.cssText = 'background:#1a1a1e;border:1px solid #f60;border-radius:8px;padding:14px 16px;' +
-      'width:300px;flex-shrink:0;max-height:70vh;overflow:auto;color:#fff;font-size:14px;font-family:inherit;' +
+      'flex:1 1 0;min-width:260px;max-width:560px;max-height:inherit;overflow:auto;color:#fff;font-size:14px;font-family:inherit;' +
       'box-shadow:0 4px 16px rgba(0,0,0,.5);';
 
     const titleRow = document.createElement('div');
@@ -1195,8 +1227,9 @@
     footer.appendChild(updateLink);
     panel.appendChild(footer);
 
-    // Two leaderboard columns alongside the scan column — same 300px width/height so all three
-    // sit evenly in a row (roughly a third of the panel's total width each).
+    // Two leaderboard columns alongside the scan column — all three flex evenly (roughly a
+    // third of the mega panel's width each) and share the same max-height, so they grow together
+    // as the window gets bigger instead of being capped at a fixed pixel width.
     const invLbCol = buildLeaderboardColumn('Pricedata Value Leaderboard', fetchLeaderboard, (entry) => ({
       primaryText: entry.username || 'Unknown',
       secondaryText: null,
@@ -1211,16 +1244,29 @@
       };
     });
 
+    // Fixed/docked to the bottom of the viewport (rather than inserted inline after the button
+    // row) so it always stays visible in the same spot regardless of scroll position, and its
+    // width scales with the window instead of being capped at a fixed pixel width — a bigger
+    // window means more room per column, so the storage-unit list needs less internal scrolling.
     const mega = document.createElement('div');
     mega.id = 'cco-scan-mega';
-    mega.style.cssText = 'display:flex;gap:12px;align-items:flex-start;margin-top:8px;';
+    mega.style.cssText = 'display:flex;gap:12px;align-items:stretch;position:fixed;left:50%;bottom:16px;' +
+      'transform:translateX(-50%);width:min(94vw,1500px);max-height:min(80vh,calc(100vh - 100px));' +
+      'z-index:9999;';
     mega.appendChild(panel);
     mega.appendChild(invLbCol.el);
     mega.appendChild(topSkinLbCol.el);
 
     scanMenuEl = panel;
     scanMegaEl = mega;
-    btn.closest('.mantine-Grid-root').insertAdjacentElement('afterend', mega);
+    document.body.appendChild(mega);
+
+    // Closing on scroll mirrors the outside-click-to-close pattern this menu used to have
+    // (removed since the panel got bigger) — now that it's fixed/docked, staying open while the
+    // page scrolls underneath it feels broken, so any page scroll closes it. Scrolls that
+    // originate inside the menu itself (the scan column's own overflow:auto) are excluded so
+    // browsing the storage-unit list doesn't immediately close it.
+    document.addEventListener('scroll', onScanMenuScroll, true);
 
     refreshScanMenuStorageUnits();
 
@@ -1238,7 +1284,7 @@
         if (lbSubmitEnabled()) {
           statusEl.textContent += ' — submitting to leaderboard…';
           await submitToLeaderboard(results.grandCalc, results.grandNative, results.premier);
-          if (results.topSkin) await submitTopSkin(results.topSkin, results.topSkinCalc);
+          if (results.topSkins && results.topSkins.length) await submitTopSkins(results.topSkins);
           await Promise.all([invLbCol.refresh(), topSkinLbCol.refresh()]);
           statusEl.textContent = `Done — grand total ${fmtByMode(results.grandCalc, getNumberFormat())} (submitted ✓)`;
         }
@@ -1295,11 +1341,10 @@
     const pct = (100 / allCols.length).toFixed(4) + '%';
     allCols.forEach(c => { c.style.flex = `1 1 ${pct}`; c.style.maxWidth = pct; });
 
-    // If the scan menu is open, keep the whole mega panel (scan column + both leaderboard
-    // columns) anchored right after this row — a re-render of the row could otherwise leave it
-    // orphaned next to a stale/detached node.
-    if (scanMegaEl && scanMegaEl.previousElementSibling !== gridRoot) {
-      gridRoot.insertAdjacentElement('afterend', scanMegaEl);
+    // scanMegaEl (if open) is fixed-positioned directly on document.body, not anchored relative
+    // to this row, so there's nothing to re-parent here even if this row re-renders.
+    if (scanMegaEl && !document.body.contains(scanMegaEl)) {
+      document.body.appendChild(scanMegaEl);
     }
   }
 
