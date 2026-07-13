@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.24
+// @version      5.25
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
 // @match        https://case-clicker.com/*
 // @grant        none
-// @run-at       document-idle
+// @run-at       document-start
 // @updateURL    https://raw.githubusercontent.com/rowkav09/CCO-scripts-archive/main/scripts/Utilities/Case%20Clicker%20Pricedata%20Overlay-2.7.user.js
 // @downloadURL  https://raw.githubusercontent.com/rowkav09/CCO-scripts-archive/main/scripts/Utilities/Case%20Clicker%20Pricedata%20Overlay-2.7.user.js
 // ==/UserScript==
@@ -1467,7 +1467,6 @@
         (meta.type === 'inv' && ctxNow.type === 'inv') ||
         (meta.type === 'su' && ctxNow.type === 'su' && ctxNow.id === meta.id)
       );
-      console.error('[cco-debug] takeover check', { url, meta, ctxNow, ctxMatchesNow, activePage: getActivePage(), sortMode });
       if (ctxMatchesNow && meta.page === getActivePage() && sortMode === 'pricedata') {
         try {
           const res = await origFetch(input, init);
@@ -1531,7 +1530,14 @@
       // a raw native-order fetch and reintroduce the card/price mismatch.
       if (sortMode === 'pricedata') {
         const globalItems = await getGlobalSorted(ctx);
-        const pageSize = knownPageSize || 24;
+        // knownPageSize is only ever learned from a real response the fetch patch's takeover
+        // saw go by (see below) — on a fresh load it's still null here, since this runs eagerly
+        // from init(), before any such response can possibly have arrived yet. Falling back to a
+        // guessed constant (24) instead of the real page size (commonly 50) sliced the wrong
+        // range and mismatched every card actually rendered — prefer whatever's actually on
+        // screen right now (updates live as more cards mount) over a guess.
+        const domCount = document.querySelectorAll('.mantine-Card-root').length;
+        const pageSize = knownPageSize || domCount || 24;
         const start = (page - 1) * pageSize;
         nativePageSkins = globalItems.slice(start, start + pageSize);
         scheduleTick();
@@ -1572,11 +1578,38 @@
     }
 
     const rankById = new Map(nativePageSkins.map((s, i) => [s._id, i]));
+    let matched = 0;
     cards.forEach(card => {
       const skin = getSkinFromCardFiber(card);
       const rank = skin && skin._id != null ? rankById.get(skin._id) : undefined;
+      if (rank != null) matched++;
       card.parentElement.style.order = rank != null ? String(rank) : '';
     });
+
+    // Self-heal: on a fresh load with Pricedata already active from a previous session, the
+    // site's own very first /api/inventory fetch can occasionally slip past our window.fetch
+    // patch before the patch is installed (a startup race @run-at document-start is meant to
+    // close, but isn't provably airtight against every timing scenario) — when that happens
+    // React renders whatever page it actually fetched in native order, which for an inventory
+    // spanning multiple pages is a DIFFERENT set of items than the true global top-N for this
+    // page. No amount of re-running applySort() fixes that: CSS `order` only reorders cards that
+    // are actually on screen, and most of them simply aren't the right items to begin with. A
+    // low fiber-match rate across a full page of cards is the signature of this happening. One
+    // corrective reload genuinely fixes it (the site's real fetch reliably lands after our
+    // by-then-fully-initialized patch) — gated by sessionStorage to fire at most once per tab
+    // session so a genuinely unfixable state can't turn into a reload loop. Cleared again once a
+    // load actually matches well, so a later, unrelated occurrence can still self-heal too.
+    if (nativePageSkins.length >= 10 && cards.length >= Math.min(nativePageSkins.length, 10)) {
+      const matchRate = matched / cards.length;
+      try {
+        if (matchRate >= 0.5) {
+          sessionStorage.removeItem('cco_sortFixAttempted');
+        } else if (!sessionStorage.getItem('cco_sortFixAttempted')) {
+          sessionStorage.setItem('cco_sortFixAttempted', '1');
+          location.reload();
+        }
+      } catch (e) { /* storage blocked — just leave it CSS-reordered as best effort */ }
+    }
   }
 
   function setSortMode(mode) {
