@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.29
+// @version      5.30
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -61,6 +61,10 @@
   // simply never has to be won — Pricedata is only ever active after the user explicitly clicks
   // it on a page that's already fully loaded and running, which isn't racy at all.
   let sortMode = 'native';
+  // See injectPricedataOption()'s custom-option click handler — set right before we synthetically
+  // click a real native option purely to trigger a genuine fetch, so that same native option's
+  // own click listener doesn't undo it by calling setSortMode('native') a moment later.
+  let suppressNextNativeReset = false;
   let nativePageSkins = [];   // last skins array actually fetched for the visible page, in server order
   let currentPageSkins = [];  // mirrors nativePageSkins; index i always pairs with the i-th .mantine-Card-root
                               // in DOM order (visual sort uses CSS `order`, so DOM order never changes)
@@ -1708,7 +1712,13 @@
     nativeOptions.forEach(o => {
       if (o.dataset.ccoNativeHooked) return;
       o.dataset.ccoNativeHooked = '1';
-      o.addEventListener('click', () => setSortMode('native'));
+      o.addEventListener('click', () => {
+        // See the custom Pricedata option's click handler below — it synthetically clicks one
+        // of these to force a real fetch while staying in Pricedata mode, which would otherwise
+        // immediately flip straight back to native right here.
+        if (suppressNextNativeReset) { suppressNextNativeReset = false; return; }
+        setSortMode('native');
+      });
     });
     let custom = dropdown.querySelector('[data-cco-option]');
     if (!custom) {
@@ -1720,14 +1730,32 @@
       custom.addEventListener('click', (e) => {
         e.stopPropagation();
         setSortMode('pricedata');
-        // Used to be location.reload() — forced a genuine network request so the fetch patch's
-        // Pricedata takeover applied immediately, but a full page reload lost scroll position
-        // and felt jarring compared to every other sort option (which just re-renders in place).
-        // primeCurrentPage() fetches the correctly-ranked slice for the current page directly
-        // (no reload); applySort()/updateCardPrices() now reorder/reprice the existing cards via
-        // CSS `order` + fiber-matched skin _id instead of relying on the DOM already being in
-        // fetch order (see their comments).
-        primeCurrentPage();
+        // Used to be location.reload() (jarring — lost scroll position), then just
+        // primeCurrentPage() (silent no-op most of the time): primeCurrentPage() only updates
+        // OUR OWN bookkeeping and CSS-reorders whatever cards are ALREADY rendered — it never
+        // makes React re-render with the correct item set. That's fine only when the currently
+        // displayed page happens to already show the exact same SET of items as the true global
+        // top-N for this page, which is basically never true once an inventory spans more than
+        // one page (confirmed live: switching straight from Latest to Pricedata left most cards
+        // unmatched and looking randomly ordered, with wrong-looking $0s among them purely
+        // because the wrong items were still on screen — that's what was actually being reported
+        // as "pricedata is completely broken").
+        //
+        // Fix: force a genuine fetch the way every native sort option already reliably does,
+        // by synthetically clicking one of THEM — our window.fetch patch's Pricedata takeover
+        // (already proven correct for native sort changes) then swaps that real response with
+        // the true globally-sorted slice before React ever renders it, same as always. Suppress
+        // that option's own click handler just this once so it doesn't flip us back to native a
+        // moment later. Whichever native option isn't already the site's active selection is
+        // picked, since "selecting" the currently-active one may not fire a new request at all.
+        const currentlyActive = nativeOptions.find(o => o.getAttribute('aria-selected') === 'true' || o.hasAttribute('data-checked'));
+        const trigger = nativeOptions.find(o => o !== currentlyActive) || nativeOptions[0];
+        if (trigger) {
+          suppressNextNativeReset = true;
+          trigger.click();
+        } else {
+          primeCurrentPage(); // no native option available to piggyback on — best effort fallback
+        }
       });
       dropdown.appendChild(custom);
     }
