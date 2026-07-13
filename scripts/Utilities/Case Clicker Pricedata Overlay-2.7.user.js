@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.19
+// @version      5.20
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -1965,6 +1965,23 @@
     hookLeaderboardPage();
   }
 
+  // Lightweight sibling of scheduleTick() — same debounce shape, but only runs the one thing
+  // that's actually safe/useful outside <main>: overlaying the calculated price onto whatever
+  // skin cards showed up (e.g. a shared item/trade preview posted in Global Chat). Deliberately
+  // skips applySort()/injectScanButton()/autoScanStorageUnitIfNeeded()/etc. — those are meaningless
+  // outside the real inventory/SU pages and were the actual reason chat was excluded from the
+  // main tick loop in the first place (every chat message re-running the whole tick was the
+  // original bug this exclusion fixed). This only fixes the side effect that fix introduced:
+  // card price overlays never applying to anything rendered inside chat at all.
+  let chatTickTimer = null;
+  function scheduleChatTick() {
+    if (chatTickTimer) return;
+    chatTickTimer = setTimeout(() => {
+      chatTickTimer = null;
+      updateExtraCardPrices();
+    }, 50);
+  }
+
   // ---------- Bootstrap ----------
   function init() {
     // Chat lives in its own <aside>/complementary panel, a SIBLING of <main> — observing
@@ -1976,6 +1993,16 @@
       scheduleTick();
     });
     observer.observe(observeRoot, { childList: true, subtree: true });
+
+    // Separate, narrow-purpose observer for the chat aside (see scheduleChatTick's comment) —
+    // this is what actually fixes "skin cards shared in Global Chat never get priced": the main
+    // observer above never sees DOM changes here since <aside> isn't inside <main>.
+    const chatAside = document.querySelector('.mantine-AppShell-aside');
+    if (chatAside) {
+      const chatObserver = new MutationObserver(() => scheduleChatTick());
+      chatObserver.observe(chatAside, { childList: true, subtree: true });
+    }
+
     hydrateSheetDataFromCache();
     loadData();
     scheduleSheetRefresh();
