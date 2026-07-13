@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.13
+// @version      5.14
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -898,12 +898,25 @@
 
   // Closing used to also happen on any click outside the panel, which made it disappear when
   // clicking the blank page background around it (now that there's a wide 3-column panel, that
-  // dead space is much bigger). Closing is now only ever explicit: the × button, or clicking the
-  // Pricedata Scan button again (toggleScanMenu). The panel sits inline in the page (pushing the
-  // inventory cards below it down, not floating over them), so page scroll just scrolls it like
-  // any other content — it must NOT close on scroll, since scrolling down is exactly how you'd
-  // reach the cards that got pushed below it.
+  // dead space is much bigger). Closing is now explicit (the × button, or the Pricedata Scan
+  // button again via toggleScanMenu) or on a downward page scroll only — scrolling down reads as
+  // "done looking, moving on", so it closes the menu; scrolling up (or scrolling inside the
+  // menu's own lists, in either direction) never closes it, since that's normal browsing of the
+  // menu itself or of the cards pushed below it.
+  const lastScrollTop = new WeakMap();
+  function onScanMenuScroll(e) {
+    const target = e.target;
+    if (!target) return;
+    if (target.nodeType === 1 && scanMegaEl && scanMegaEl.contains(target)) return; // scroll inside the menu itself — ignore
+    const scrollEl = target === document ? (document.scrollingElement || document.documentElement) : target;
+    const top = typeof scrollEl.scrollTop === 'number' ? scrollEl.scrollTop : window.scrollY;
+    const prev = lastScrollTop.get(scrollEl);
+    lastScrollTop.set(scrollEl, top);
+    if (prev != null && top > prev) closeScanMenu(); // scrolled down since last event
+  }
+
   function closeScanMenu() {
+    document.removeEventListener('scroll', onScanMenuScroll, true);
     if (scanMegaEl) { scanMegaEl.remove(); scanMegaEl = null; }
     scanMenuEl = null;
   }
@@ -1258,6 +1271,10 @@
     scanMenuEl = panel;
     scanMegaEl = mega;
     btn.closest('.mantine-Grid-root').insertAdjacentElement('afterend', mega);
+
+    // Capture phase so this sees scroll events from any scrollable container on the page (the
+    // 'scroll' event itself doesn't bubble, only capturing listeners on ancestors catch it).
+    document.addEventListener('scroll', onScanMenuScroll, true);
 
     refreshScanMenuStorageUnits();
 
