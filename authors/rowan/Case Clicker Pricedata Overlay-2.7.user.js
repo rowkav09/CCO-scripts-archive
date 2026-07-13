@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.22
+// @version      5.23
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -2016,7 +2016,6 @@
     if (ctx && ctx.type === 'su') autoScanStorageUnitIfNeeded(ctx);
     injectBulkIncludeToggle(); // no-ops (and cleans up) when not on a storage-unit page
     hookLeaderboardPage();
-    tryAttachChatObserver();
   }
 
   // Lightweight sibling of scheduleTick() — same debounce shape, but only runs the one thing
@@ -2036,39 +2035,43 @@
     }, 50);
   }
 
-  // Separate, narrow-purpose observer for the chat aside (see scheduleChatTick's comment) — this
-  // is what actually fixes "skin cards shared in Global Chat never get priced": the main observer
-  // in init() below never sees DOM changes here since <aside> isn't inside <main>.
-  //
-  // Attaching this only once at init() time (the original v5.20 approach) turned out to be
-  // fragile: if the chat aside hasn't mounted yet at document-idle (this is a client-rendered
-  // SPA — the shell can still be hydrating), document.querySelector found nothing and this
-  // silently never attached for the rest of the page's life, leaving the exact bug it was meant
-  // to fix. Calling this from every tick() instead (cheap — one querySelector, no-ops once
-  // already attached) makes it self-healing regardless of mount timing.
-  let chatObserverAttached = false;
-  function tryAttachChatObserver() {
-    if (chatObserverAttached) return;
-    const chatAside = document.querySelector('.mantine-AppShell-aside');
-    if (!chatAside) return;
-    chatObserverAttached = true;
-    const chatObserver = new MutationObserver(() => scheduleChatTick());
-    chatObserver.observe(chatAside, { childList: true, subtree: true });
+  // Is this mutation entirely inside the chat aside? Used to route mutations to the cheap
+  // chat-only tick vs. the full tick, WITHOUT holding a reference to any specific <main>/<aside>
+  // element (see the big comment on the single observer in init() for why that used to break).
+  function isInChatAside(node) {
+    const el = node.nodeType === 1 ? node : node.parentElement;
+    return !!(el && el.closest && el.closest('.mantine-AppShell-aside'));
   }
 
   // ---------- Bootstrap ----------
   function init() {
-    // Chat lives in its own <aside>/complementary panel, a SIBLING of <main> — observing
-    // document.body scheduled a tick on every single DOM mutation anywhere on the page,
-    // including every Global Chat message arriving. Scoping to <main> means chat activity
-    // (and anything else outside <main>) no longer triggers a tick at all.
-    const observeRoot = document.querySelector('main') || document.body;
-    const observer = new MutationObserver(() => {
-      scheduleTick();
+    // v5.20-v5.22 attached separate observers to a specific <main> element and a specific
+    // <aside> element, captured once (at init, or lazily the first time each was found). That
+    // seemed fine — until testing directly against the live site showed that client-side
+    // navigation (clicking any in-app link, e.g. Inventory -> Trading) does NOT mutate the
+    // existing <main>/<aside> nodes in place; React unmounts them and mounts brand-new ones as
+    // siblings-replacing-siblings. A MutationObserver watching the old node keeps watching an
+    // orphaned, detached subtree forever — it never fires again for the rest of that page load.
+    // Confirmed live: after an in-app nav, both `document.querySelector('main')` and
+    // `.mantine-AppShell-aside` returned nodes that were `!==` the pre-nav references AND no
+    // longer `document.contains(...)`. That's the actual root cause of "adding to trade / things
+    // in an open trade never get Pricedata applied" — the user loads the site somewhere, the
+    // observer attaches to THAT page's <main>, then they navigate to Trading and the observer is
+    // already dead, so tick() never runs again no matter what happens on the trade page.
+    //
+    // Fix: observe document.documentElement (the <html> element — never replaced, only its
+    // descendants are) instead of a snapshot of <main>/<aside>. To keep the original
+    // "don't full-tick on every Global Chat message" performance property, classify each
+    // mutation batch instead of relying on observer scope: if every mutation in the batch is
+    // inside .mantine-AppShell-aside, run only the cheap chat tick; otherwise run the full tick
+    // (which also covers chat via updateExtraCardPrices(), so nothing is missed either way).
+    const observer = new MutationObserver((mutations) => {
+      const onlyChat = mutations.every(m => isInChatAside(m.target));
+      if (onlyChat) scheduleChatTick();
+      else scheduleTick();
     });
-    observer.observe(observeRoot, { childList: true, subtree: true });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
 
-    tryAttachChatObserver();
     hydrateSheetDataFromCache();
     loadData();
     scheduleSheetRefresh();
