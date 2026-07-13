@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.26
+// @version      5.28
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -437,7 +437,7 @@
     if (sortMode === 'pricedata') {
       const byId = new Map(currentPageSkins.map(s => [s._id, s]));
       cards.forEach(card => {
-        const fiberSkin = getSkinFromCardFiber(card);
+        const fiberSkin = getSkinCached(card);
         const skin = fiberSkin && fiberSkin._id != null ? byId.get(fiberSkin._id) : null;
         if (!skin) return;
         const badge = [...card.querySelectorAll('.mantine-Badge-label')].find(e => /^\$[\d,]+\.\d{2}$/.test(e.textContent.trim()));
@@ -501,8 +501,18 @@
   // response body to pair against currentPageSkins. Instead read the skin object off the card's
   // own React fiber (Mantine Card receives it as a `skin` prop a few hops up). Cards already
   // handled by updateCardPrices() are skipped via the ccoTooltip marker.
+  // Every fiber-attached DOM node in the same React tree uses the SAME internal prop key name
+  // (e.g. "__reactFiber$abc123") — it's assigned once by React per render pass, not per node.
+  // Re-scanning Object.keys(card) to rediscover it on every single card was pure repeated waste;
+  // find it once and reuse it. Falls back to a fresh scan if a card ever doesn't have it (e.g. a
+  // detached/foreign node), so this can't silently break if React ever changes the key.
+  let cachedFiberKey = null;
   function getSkinFromCardFiber(card) {
-    const key = Object.keys(card).find(k => k.startsWith('__reactFiber'));
+    let key = cachedFiberKey != null && card[cachedFiberKey] !== undefined ? cachedFiberKey : null;
+    if (!key) {
+      key = Object.keys(card).find(k => k.startsWith('__reactFiber'));
+      if (key) cachedFiberKey = key;
+    }
     if (!key) return null;
     let fiber = card[key];
     let hops = 0;
@@ -515,13 +525,26 @@
     return null;
   }
 
+  // applySort(), updateCardPrices(), and updateExtraCardPrices() each independently fiber-walked
+  // every card on the page, every tick — up to 3 full 30-hop walks per card per tick in Pricedata
+  // mode, on every single card visible. Caching the result per card, cleared fresh at the start
+  // of each tick() (see tick() below), means each card is only ever walked once per tick no
+  // matter how many of these functions need its skin.
+  let fiberSkinCache = new WeakMap();
+  function getSkinCached(card) {
+    if (fiberSkinCache.has(card)) return fiberSkinCache.get(card);
+    const skin = getSkinFromCardFiber(card);
+    fiberSkinCache.set(card, skin);
+    return skin;
+  }
+
   function updateExtraCardPrices() {
     const cards = document.querySelectorAll('.mantine-Card-root');
     cards.forEach(card => {
       if (!card.offsetParent) return; // skip hidden/duplicate nodes (e.g. trade board's offscreen animation copies)
       const badge = [...card.querySelectorAll('.mantine-Badge-label')].find(e => /^\$[\d,]+\.\d{2}$/.test(e.textContent.trim()));
       if (!badge || badge.dataset.ccoTooltip) return; // no price badge here, or already handled
-      const skin = getSkinFromCardFiber(card);
+      const skin = getSkinCached(card);
       if (!skin) return;
       const { calc, native } = calcPrice(skin);
       const calcText = fmtFull(calc);
@@ -1578,64 +1601,29 @@
     }
 
     const rankById = new Map(nativePageSkins.map((s, i) => [s._id, i]));
-    let matched = 0;
     cards.forEach(card => {
-      const skin = getSkinFromCardFiber(card);
+      const skin = getSkinCached(card);
       const rank = skin && skin._id != null ? rankById.get(skin._id) : undefined;
-      if (rank != null) matched++;
       card.parentElement.style.order = rank != null ? String(rank) : '';
     });
 
-    // Self-heal (see scheduleSelfHealCheck below for why this exists and why it's debounced
-    // instead of judged on every tick).
-    if (nativePageSkins.length >= 10 && cards.length >= Math.min(nativePageSkins.length, 10)) {
-      scheduleSelfHealCheck(matched, cards.length);
-    }
-  }
-
-  // Checks, ONCE per page load, whether Pricedata sort ever actually matched the cards the site
-  // rendered — see applySort()'s call site. This used to judge match rate synchronously on every
-  // single tick, which sounds fine but isn't: while the page is still progressively mounting
-  // cards (images/data trickling in), the match rate is naturally unstable and swings above and
-  // below any threshold several times before settling. Judging it live meant occasionally
-  // triggering a reload, having the SAME transient instability during the reload's own initial
-  // render, triggering ANOTHER reload, and so on — a real loop a user actually hit (reported:
-  // "restart loop... never fully loads until around 5 tries"). Fix: only ever look at the LATEST
-  // snapshot, and only after 2s of no new tick has passed (the page has stopped changing), and
-  // only decide once total per load via selfHealDone — no re-arming, no live flapping.
-  let selfHealTimer = null;
-  let selfHealDone = false;
-  let selfHealLatest = null;
-  function scheduleSelfHealCheck(matched, cardCount) {
-    if (selfHealDone) return;
-    selfHealLatest = { matched, cardCount };
-    if (selfHealTimer) clearTimeout(selfHealTimer);
-    selfHealTimer = setTimeout(() => {
-      selfHealTimer = null;
-      if (selfHealDone || !selfHealLatest) return;
-      selfHealDone = true;
-      const { matched: m, cardCount: c } = selfHealLatest;
-      if (m / c < 0.5) {
-        try {
-          if (!sessionStorage.getItem('cco_sortFixAttempted')) {
-            sessionStorage.setItem('cco_sortFixAttempted', '1');
-            location.reload();
-          }
-        } catch (e) { /* storage blocked — leave it CSS-reordered as best effort */ }
-      }
-    }, 2000);
+    // An earlier version of this tried to auto-detect a bad match rate and force a corrective
+    // location.reload() when it looked wrong. That turned into an actual reload loop for at
+    // least one user despite several attempts at debouncing/gating it (match rate during
+    // progressive card mounting is genuinely too noisy to safely judge from inside the page, and
+    // a reload-based fix has no hard upper bound on how many times it can legitimately re-trigger
+    // if the underlying condition persists across reloads). Auto-reloading the user's game is a
+    // worse failure mode than an occasionally-imperfect sort, so this no longer does that at all
+    // — @run-at document-start (see init()) and the corrected page-size guess in
+    // primeCurrentPage() are what actually fix the root cause; this was only ever a safety net
+    // for the rare case they didn't. If sort still looks wrong, switching the Sort dropdown away
+    // from Pricedata and back re-runs primeCurrentPage() and typically corrects it without a
+    // reload at all.
   }
 
   function setSortMode(mode) {
     sortMode = mode === 'pricedata' ? 'pricedata' : 'native';
     localStorage.setItem('cco_sortMode', sortMode);
-    // A real, deliberate click into Pricedata is a fresh attempt — let it self-heal again even
-    // if an earlier page load on this tab already used up its one auto-reload (see
-    // scheduleSelfHealCheck). Only clearing it here, never from passive tick-driven monitoring,
-    // is what keeps the self-heal from ever re-arming itself mid-load and looping.
-    if (sortMode === 'pricedata') {
-      try { sessionStorage.removeItem('cco_sortFixAttempted'); } catch (e) { /* ignore */ }
-    }
     scheduleTick();
   }
 
@@ -2020,13 +2008,19 @@
   }
 
   // ---------- Tick / scheduling ----------
+  // 50ms meant that any sustained burst of DOM mutations (the observer now also has to watch the
+  // whole document, not just <main>, to survive SPA navigation — see init()) ran a full tick, with
+  // its several querySelectorAll('.mantine-Card-root') passes and fiber walks, up to ~20x/sec.
+  // 150ms still feels instant for anything a user actually clicks, but cuts worst-case tick rate
+  // by 3x for pages with frequent incidental churn (chat aside is separately excluded already —
+  // this is for everything else, e.g. live stat counters elsewhere on the page).
   let tickTimer = null;
   function scheduleTick() {
     if (tickTimer) return;
     tickTimer = setTimeout(() => {
       tickTimer = null;
       tick();
-    }, 50);
+    }, 150);
   }
   // The leaderboard's #pricedata hash route needs to react to browser back/forward too, not
   // just clicks on our own buttons — hashchange doesn't touch the DOM so the MutationObserver
@@ -2050,6 +2044,10 @@
   }
 
   function tick() {
+    // Fresh per tick — see getSkinCached's comment. Cheap (WeakMap alloc), and guarantees a card
+    // whose underlying skin genuinely changed between ticks (e.g. a trade being edited) is never
+    // served a stale fiber-read from a previous tick.
+    fiberSkinCache = new WeakMap();
     const ctx = currentContext();
     const cards = document.querySelectorAll('.mantine-Card-root');
     // Only the real /inventory and storage-unit list pages have a Sort dropdown our takeover
