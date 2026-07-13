@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.23
+// @version      5.24
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -1467,6 +1467,7 @@
         (meta.type === 'inv' && ctxNow.type === 'inv') ||
         (meta.type === 'su' && ctxNow.type === 'su' && ctxNow.id === meta.id)
       );
+      console.error('[cco-debug] takeover check', { url, meta, ctxNow, ctxMatchesNow, activePage: getActivePage(), sortMode });
       if (ctxMatchesNow && meta.page === getActivePage() && sortMode === 'pricedata') {
         try {
           const res = await origFetch(input, init);
