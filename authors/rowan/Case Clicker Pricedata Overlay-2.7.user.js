@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.18
+// @version      5.19
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -298,8 +298,18 @@
         const adj = parseAdjustment(row[10]); if (adj) price = applyAdjustment(price, adj);
       }
 
-      // EV only applies to actual event skins — verified against reference output.
-      if (skin.event) {
+      // EV only applies to actual event skins — verified against reference output. BUT: for
+      // "Gem" skin-group rows (Doppler Ruby/Sapphire/Emerald, etc.) the sheet's EV column is a
+      // permanent per-pattern rarity premium (every Gem row has one, e.g. x5), not a calendar
+      // event bonus — confirmed live: two copies of the exact same "M9 Bayonet | Gamma Doppler
+      // Emerald (Factory New)" priced 14x apart ($10,000 vs $145,000) purely because one copy's
+      // `skin.event` object happened to be a "Christmas 2025" holiday-drop flair flag (unrelated
+      // decorative wrapping the game attaches to some copies, not a rarity indicator) and the
+      // other didn't have it. Gating the Gem multiplier behind that flag meant most Gem-pattern
+      // knives/gloves were silently missing their entire rarity premium. Applying it
+      // unconditionally for Gem rows fixes this without touching the (previously verified)
+      // event-gated behavior for every other skin group.
+      if (skin.event || skinGroupValue === 'Gem') {
         const ev = parseAdjustment(row[11]);
         if (ev) price = applyAdjustment(price, ev);
         else if (EVENT_EV_FALLBACK_BY_PATTERN_ID[skin.patternId] != null) price = EVENT_EV_FALLBACK_BY_PATTERN_ID[skin.patternId];
@@ -581,7 +591,13 @@
     const key = ctx.type === 'su' ? 'su:' + ctx.id : 'inv';
     const existing = inFlightFetches.get(key);
     if (existing) return existing;
-    const promise = fetchAllSkins(ctx, onProgress).finally(() => {
+    // Force sort:'' here too (see fetchAllSkins's comment) — both of this function's callers
+    // (getGlobalSorted, triggerTotalsCalculation) either sum every item or re-rank them by
+    // calcPrice themselves, so fetch order never matters, but inheriting the page's live Sort
+    // dropdown value silently truncated results to 0 for float/rank sort whenever the unit had
+    // no floatable items (e.g. sticker/gem-only storage units) — this was the same bug behind
+    // Pricedata sort "breaking" (globalSortedCache ending up built from an empty/partial fetch).
+    const promise = fetchAllSkins(ctx, onProgress, '').finally(() => {
       if (inFlightFetches.get(key) === promise) inFlightFetches.delete(key);
     });
     inFlightFetches.set(key, promise);
