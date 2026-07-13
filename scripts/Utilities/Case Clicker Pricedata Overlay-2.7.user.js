@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.31
+// @version      5.32
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -309,18 +309,19 @@
         const adj = parseAdjustment(row[10]); if (adj) price = applyAdjustment(price, adj);
       }
 
-      // EV only applies to actual event skins — verified against reference output. BUT: for
-      // "Gem" skin-group rows (Doppler Ruby/Sapphire/Emerald, etc.) the sheet's EV column is a
-      // permanent per-pattern rarity premium (every Gem row has one, e.g. x5), not a calendar
-      // event bonus — confirmed live: two copies of the exact same "M9 Bayonet | Gamma Doppler
-      // Emerald (Factory New)" priced 14x apart ($10,000 vs $145,000) purely because one copy's
-      // `skin.event` object happened to be a "Christmas 2025" holiday-drop flair flag (unrelated
-      // decorative wrapping the game attaches to some copies, not a rarity indicator) and the
-      // other didn't have it. Gating the Gem multiplier behind that flag meant most Gem-pattern
-      // knives/gloves were silently missing their entire rarity premium. Applying it
-      // unconditionally for Gem rows fixes this without touching the (previously verified)
-      // event-gated behavior for every other skin group.
-      if (skin.event || skinGroupValue === 'Gem') {
+      // EV only applies to actual event-tagged copies. v5.19 changed this to also apply
+      // unconditionally to every "Gem" skin-group row (Doppler Ruby/Sapphire/Emerald, Case
+      // Hardened gems, etc.), reasoning from one M9 Bayonet Gamma Doppler Emerald pair priced 14x
+      // apart that looked like a bug. That reasoning doesn't hold up: confirmed live against a
+      // real "Paracord Knife | Doppler 'Sapphire' (Factory New)" trio (same patternId, same
+      // $1,806.40 native price) where exactly ONE copy carries a real `skin.event` tag ("Pride
+      // Month 2026") and the other two don't — the sheet's own FN price for that pattern is
+      // $800,000 (Skin Group "Gem", EV "x5"), so the two non-event copies should show $800,000
+      // and only the actual event copy should show the x5'd $4,000,000. v5.19's unconditional
+      // Gem multiplier priced all three at $4,000,000, inflating every non-event Gem-pattern copy
+      // 5x. Reverting to the original, simpler, correct rule: EV only applies when this specific
+      // copy is actually event-tagged.
+      if (skin.event) {
         const ev = parseAdjustment(row[11]);
         if (ev) price = applyAdjustment(price, ev);
         else if (EVENT_EV_FALLBACK_BY_PATTERN_ID[skin.patternId] != null) price = EVENT_EV_FALLBACK_BY_PATTERN_ID[skin.patternId];
