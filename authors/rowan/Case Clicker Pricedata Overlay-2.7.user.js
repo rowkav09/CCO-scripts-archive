@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.9
+// @version      5.10
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -671,12 +671,14 @@
 
   function sumSkins(skins) {
     let calc = 0, native = 0, includedCount = 0;
+    let topSkin = null, topCalc = -Infinity;
     skins.forEach(s => {
       if (!isIncluded(s._id)) return;
       const r = calcPrice(s);
       calc += r.calc; native += r.native; includedCount++;
+      if (r.calc > topCalc) { topCalc = r.calc; topSkin = s; }
     });
-    return { calc, native, count: skins.length, includedCount };
+    return { calc, native, count: skins.length, includedCount, topSkin, topCalc: topSkin ? topCalc : null };
   }
 
   // Writes both the in-memory totalsCache and the persisted localStorage cache for a key —
@@ -706,10 +708,16 @@
 
     const grandCalc = inv.calc + suResults.reduce((s, r) => s + r.calc, 0);
     const grandNative = inv.native + suResults.reduce((s, r) => s + r.native, 0);
+
+    // Single most valuable skin across inventory + every storage unit — for the "Most Valuable
+    // Skin" leaderboard, independent of the grand totals above.
+    let topSkin = inv.topSkin, topCalc = inv.topCalc == null ? -Infinity : inv.topCalc;
+    suResults.forEach(r => { if (r.topSkin && r.topCalc > topCalc) { topCalc = r.topCalc; topSkin = r.topSkin; } });
+
     onProgress && onProgress('Fetching Premier stats…');
     const premier = await fetchPremierStats();
     renderInlineTotal(); // reflect the freshly-cached inventory total immediately, if we're on /inventory
-    return { inv, sus: suResults, grandCalc, grandNative, premier };
+    return { inv, sus: suResults, grandCalc, grandNative, premier, topSkin, topSkinCalc: topSkin ? topCalc : null };
   }
 
   // Premier rank/rating live on /api/me (the game-stats endpoint) alongside money/xp/etc —
@@ -753,12 +761,17 @@
     inner.appendChild(document.createTextNode(text));
   }
 
-  // ---------- Inventory-value leaderboard (backed by own Vercel API) ----------
-  // Contract (see api/submit-score.js + api/leaderboard.js shipped alongside this script):
+  // ---------- Leaderboards (backed by own Vercel API) ----------
+  // Contract (see api/submit-score.js + api/leaderboard.js, and api/submit-top-skin.js +
+  // api/top-skin-leaderboard.js, shipped alongside this script):
   //   POST {LEADERBOARD_API_BASE}/api/submit-score
   //     body: { userId, username, avatarUrl, totalValue, nativeValue }  -> { ok: true }
   //   GET  {LEADERBOARD_API_BASE}/api/leaderboard?limit=50
   //     -> { entries: [{ rank, userId, username, avatarUrl, totalValue, nativeValue, updatedAt }] }
+  //   POST {LEADERBOARD_API_BASE}/api/submit-top-skin
+  //     body: { userId, username, avatarUrl, skinName, exterior, statTrak, souvenir, quality, value } -> { ok: true }
+  //   GET  {LEADERBOARD_API_BASE}/api/top-skin-leaderboard?limit=50
+  //     -> { entries: [{ rank, userId, username, avatarUrl, skinName, exterior, statTrak, souvenir, quality, value, updatedAt }] }
   // User identity isn't on /api/me (game stats only) — it lives on the auth session endpoint:
   // GET /api/auth/get-session -> { session, user: { id, name, image, ... } }.
   let meCache = null;
@@ -806,6 +819,47 @@
     }
   }
 
+  // Submits the single most valuable skin found during this scan — replaces whatever was
+  // stored before for this user, since it reflects current holdings, not a highest-ever record.
+  async function submitTopSkin(skin, calc) {
+    if (!CONFIG.LEADERBOARD_API_BASE || !skin) return;
+    try {
+      const me = await getMe();
+      const userId = me && me.id;
+      if (!userId) return;
+      const username = (me && me.name) || 'Unknown';
+      const avatarUrl = (me && me.image) || null;
+      await origFetch(CONFIG.LEADERBOARD_API_BASE.replace(/\/$/, '') + '/api/submit-top-skin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CCO-Client': 'cco-overlay-v1' },
+        body: JSON.stringify({
+          userId, username, avatarUrl,
+          skinName: skin.name || 'Unknown Skin',
+          exterior: skin.exterior || '',
+          statTrak: !!skin.statTrak,
+          souvenir: !!skin.souvenir,
+          quality: typeof skin.quality === 'number' ? skin.quality : 0,
+          value: calc,
+        }),
+      });
+    } catch (e) {
+      console.error('[cco-pricedata] top-skin submit failed', e);
+    }
+  }
+
+  async function fetchTopSkinLeaderboard(limit) {
+    if (!CONFIG.LEADERBOARD_API_BASE) return [];
+    try {
+      const data = await origFetch(
+        CONFIG.LEADERBOARD_API_BASE.replace(/\/$/, '') + '/api/top-skin-leaderboard?limit=' + (limit || 50)
+      ).then(r => r.json());
+      return (data && data.entries) || [];
+    } catch (e) {
+      console.error('[cco-pricedata] top-skin leaderboard fetch failed', e);
+      return [];
+    }
+  }
+
   let scanning = false;
 
   // ---------- Scan menu (dropdown, replaces the old immediate-scan + results-modal flow) ----------
@@ -813,18 +867,17 @@
   // the inline per-page total uses) for inventory and every storage unit immediately, lets you
   // trigger a fresh Scan All with live progress, toggle leaderboard submission, and click any
   // storage unit row to open it.
-  let scanMenuEl = null;
+  let scanMenuEl = null;   // the "Pricedata Scan" column specifically (scan controls + SU list)
+  let scanMegaEl = null;   // outer row wrapping scanMenuEl + the two leaderboard columns
   let scanMenuBtn = null;
 
+  // Closing used to also happen on any click outside the panel, which made it disappear when
+  // clicking the blank page background around it (now that there's a wide 3-column panel, that
+  // dead space is much bigger). Closing is now only ever explicit: the × button below, or
+  // clicking the Pricedata Scan button again (toggleScanMenu).
   function closeScanMenu() {
-    if (scanMenuEl) { scanMenuEl.remove(); scanMenuEl = null; }
-    document.removeEventListener('click', onScanMenuOutsideClick, true);
-  }
-
-  function onScanMenuOutsideClick(e) {
-    if (scanMenuEl && !scanMenuEl.contains(e.target) && scanMenuBtn && !scanMenuBtn.contains(e.target)) {
-      closeScanMenu();
-    }
+    if (scanMegaEl) { scanMegaEl.remove(); scanMegaEl = null; }
+    scanMenuEl = null;
   }
 
   function cachedRawValue(key) {
@@ -861,13 +914,14 @@
     return row;
   }
 
-  // Re-renders every value currently shown in the menu using whatever display-format is
-  // selected right now — called when the format buttons are toggled, so switching
-  // Full/Rounded/2SF/3SF doesn't require a re-scan or reopening the menu.
+  // Re-renders every value currently shown across the whole mega panel (scan column + both
+  // leaderboard columns) using whatever display-format is selected right now — called when the
+  // format buttons are toggled, so switching Full/Rounded/2SF/3SF doesn't require a re-scan or
+  // reopening the menu.
   function reformatScanMenuValues() {
-    if (!scanMenuEl) return;
+    if (!scanMegaEl) return;
     const mode = getNumberFormat();
-    scanMenuEl.querySelectorAll('[data-raw-value]').forEach(el => {
+    scanMegaEl.querySelectorAll('[data-raw-value]').forEach(el => {
       const raw = parseFloat(el.dataset.rawValue);
       if (!isNaN(raw)) el.textContent = fmtByMode(raw, mode);
     });
@@ -895,6 +949,135 @@
     });
   }
 
+  // ---------- Leaderboard columns (shown alongside the scan column) ----------
+  const LB_PAGE_SIZE = 8;
+
+  function buildLeaderboardAvatar(avatarUrl) {
+    const img = document.createElement('img');
+    img.style.cssText = 'width:22px;height:22px;border-radius:50%;flex-shrink:0;background:#333;object-fit:cover;';
+    setAvatarSrc(img, avatarUrl);
+    return img;
+  }
+
+  // One row: rank, avatar, a primary/secondary text stack, and a value that participates in
+  // reformatScanMenuValues (via data-raw-value) same as the scan column's own rows. Clicking
+  // anywhere on the row opens that player's profile.
+  function buildLeaderboardRow(rank, userId, avatarUrl, primaryText, secondaryText, rawValue) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid #333;' +
+      'font-size:12px;cursor:pointer;';
+    row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,102,0,.08)'; });
+    row.addEventListener('mouseleave', () => { row.style.background = ''; });
+    if (userId) row.addEventListener('click', () => { window.location.href = '/profile/' + userId; });
+
+    const rankEl = document.createElement('span');
+    rankEl.style.cssText = 'opacity:.6;width:16px;flex-shrink:0;';
+    rankEl.textContent = '#' + rank;
+
+    const textWrap = document.createElement('div');
+    textWrap.style.cssText = 'flex:1;min-width:0;overflow:hidden;';
+    const primaryEl = document.createElement('div');
+    primaryEl.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    primaryEl.textContent = primaryText;
+    textWrap.appendChild(primaryEl);
+    if (secondaryText) {
+      const secondaryEl = document.createElement('div');
+      secondaryEl.style.cssText = 'opacity:.6;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      secondaryEl.textContent = secondaryText;
+      textWrap.appendChild(secondaryEl);
+    }
+
+    const valueEl = document.createElement('span');
+    valueEl.style.cssText = 'color:#f60;white-space:nowrap;flex-shrink:0;font-size:11px;';
+    valueEl.dataset.rawValue = String(rawValue);
+    valueEl.textContent = fmtByMode(rawValue, getNumberFormat());
+
+    row.appendChild(rankEl);
+    row.appendChild(buildLeaderboardAvatar(avatarUrl));
+    row.appendChild(textWrap);
+    row.appendChild(valueEl);
+    return row;
+  }
+
+  // One leaderboard column: title, a paginated entry list (LB_PAGE_SIZE per page, not endless
+  // scroll — a leaderboard can have 50+ entries and this column has a fixed height), and
+  // Prev/Next controls. `mapEntry` turns one API entry into the three text/value fields
+  // buildLeaderboardRow needs, so this same builder works for both leaderboard categories.
+  function buildLeaderboardColumn(title, fetchFn, mapEntry) {
+    const col = document.createElement('div');
+    col.style.cssText = 'background:#1a1a1e;border:1px solid #f60;border-radius:8px;padding:14px 16px;' +
+      'width:300px;flex-shrink:0;max-height:70vh;color:#fff;font-size:14px;font-family:inherit;' +
+      'box-shadow:0 4px 16px rgba(0,0,0,.5);display:flex;flex-direction:column;';
+
+    const titleEl = document.createElement('div');
+    titleEl.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:8px;flex-shrink:0;';
+    titleEl.textContent = title;
+    col.appendChild(titleEl);
+
+    const listEl = document.createElement('div');
+    listEl.style.cssText = 'flex:1;overflow:hidden;min-height:0;';
+    listEl.textContent = 'Loading…';
+    col.appendChild(listEl);
+
+    const pagerEl = document.createElement('div');
+    pagerEl.style.cssText = 'display:flex;align-items:center;justify-content:space-between;' +
+      'margin-top:8px;padding-top:8px;border-top:1px solid #333;flex-shrink:0;font-size:11px;';
+    col.appendChild(pagerEl);
+
+    let entries = [];
+    let page = 0;
+
+    function renderPage() {
+      listEl.innerHTML = '';
+      if (!entries.length) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:8px 2px;opacity:.6;font-size:12px;';
+        empty.textContent = 'No entries yet.';
+        listEl.appendChild(empty);
+        pagerEl.innerHTML = '';
+        return;
+      }
+      const totalPages = Math.max(1, Math.ceil(entries.length / LB_PAGE_SIZE));
+      page = Math.max(0, Math.min(page, totalPages - 1));
+      const start = page * LB_PAGE_SIZE;
+      entries.slice(start, start + LB_PAGE_SIZE).forEach(entry => {
+        const { primaryText, secondaryText, rawValue } = mapEntry(entry);
+        listEl.appendChild(buildLeaderboardRow(entry.rank, entry.userId, entry.avatarUrl, primaryText, secondaryText, rawValue));
+      });
+
+      pagerEl.innerHTML = '';
+      const prevBtn = document.createElement('button');
+      prevBtn.textContent = '← Prev';
+      prevBtn.disabled = page === 0;
+      const nextBtn = document.createElement('button');
+      nextBtn.textContent = 'Next →';
+      nextBtn.disabled = page >= totalPages - 1;
+      [prevBtn, nextBtn].forEach(b => {
+        b.style.cssText = 'background:transparent;color:#f60;border:1px solid #f60;border-radius:4px;' +
+          'padding:3px 8px;font-size:11px;font-weight:600;';
+        b.style.cursor = b.disabled ? 'default' : 'pointer';
+        b.style.opacity = b.disabled ? '.4' : '1';
+      });
+      prevBtn.addEventListener('click', () => { if (page > 0) { page--; renderPage(); } });
+      nextBtn.addEventListener('click', () => { if (page < totalPages - 1) { page++; renderPage(); } });
+      const pageLabel = document.createElement('span');
+      pageLabel.style.opacity = '.6';
+      pageLabel.textContent = `Page ${page + 1} / ${totalPages}`;
+      pagerEl.appendChild(prevBtn);
+      pagerEl.appendChild(pageLabel);
+      pagerEl.appendChild(nextBtn);
+    }
+
+    function load() {
+      return fetchFn(50).then(fetched => { entries = fetched || []; page = 0; renderPage(); });
+    }
+    load();
+
+    // .el is what gets inserted into the DOM; .refresh() re-fetches and jumps back to page 1 —
+    // used after a scan submission so the just-updated rank shows up immediately.
+    return { el: col, refresh: load };
+  }
+
   async function openScanMenu(btn) {
     closeScanMenu();
     scanMenuBtn = btn;
@@ -902,14 +1085,23 @@
     const panel = document.createElement('div');
     panel.id = 'cco-scan-menu';
     panel.style.cssText = 'background:#1a1a1e;border:1px solid #f60;border-radius:8px;padding:14px 16px;' +
-      'max-width:420px;width:100%;max-height:70vh;overflow:auto;color:#fff;font-size:14px;font-family:inherit;' +
-      'margin-top:8px;box-shadow:0 4px 16px rgba(0,0,0,.5);';
-    panel.addEventListener('click', (e) => e.stopPropagation());
+      'width:300px;flex-shrink:0;max-height:70vh;overflow:auto;color:#fff;font-size:14px;font-family:inherit;' +
+      'box-shadow:0 4px 16px rgba(0,0,0,.5);';
 
+    const titleRow = document.createElement('div');
+    titleRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
     const title = document.createElement('div');
-    title.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:8px;';
+    title.style.cssText = 'font-size:16px;font-weight:600;';
     title.textContent = 'Pricedata Scan';
-    panel.appendChild(title);
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.title = 'Close';
+    closeBtn.style.cssText = 'background:transparent;border:none;color:#f60;font-size:20px;line-height:1;' +
+      'cursor:pointer;padding:0 2px;';
+    closeBtn.addEventListener('click', () => closeScanMenu());
+    titleRow.appendChild(title);
+    titleRow.appendChild(closeBtn);
+    panel.appendChild(titleRow);
 
     // Display-format toggle (Full / Rounded / 2SF / 3SF) — affects every value shown in this
     // menu only (card badges and the leaderboard are unaffected), persisted across opens.
@@ -1003,9 +1195,32 @@
     footer.appendChild(updateLink);
     panel.appendChild(footer);
 
+    // Two leaderboard columns alongside the scan column — same 300px width/height so all three
+    // sit evenly in a row (roughly a third of the panel's total width each).
+    const invLbCol = buildLeaderboardColumn('Pricedata Value Leaderboard', fetchLeaderboard, (entry) => ({
+      primaryText: entry.username || 'Unknown',
+      secondaryText: null,
+      rawValue: entry.totalValue,
+    }));
+    const topSkinLbCol = buildLeaderboardColumn('Most Valuable Skin', fetchTopSkinLeaderboard, (entry) => {
+      const tags = [entry.statTrak ? 'ST' : null, entry.souvenir ? 'SV' : null, entry.exterior || null].filter(Boolean).join(' · ');
+      return {
+        primaryText: entry.username || 'Unknown',
+        secondaryText: (entry.skinName || 'Unknown Skin') + (tags ? ' — ' + tags : ''),
+        rawValue: entry.value,
+      };
+    });
+
+    const mega = document.createElement('div');
+    mega.id = 'cco-scan-mega';
+    mega.style.cssText = 'display:flex;gap:12px;align-items:flex-start;margin-top:8px;';
+    mega.appendChild(panel);
+    mega.appendChild(invLbCol.el);
+    mega.appendChild(topSkinLbCol.el);
+
     scanMenuEl = panel;
-    btn.closest('.mantine-Grid-root').insertAdjacentElement('afterend', panel);
-    setTimeout(() => document.addEventListener('click', onScanMenuOutsideClick, true), 0);
+    scanMegaEl = mega;
+    btn.closest('.mantine-Grid-root').insertAdjacentElement('afterend', mega);
 
     refreshScanMenuStorageUnits();
 
@@ -1023,6 +1238,8 @@
         if (lbSubmitEnabled()) {
           statusEl.textContent += ' — submitting to leaderboard…';
           await submitToLeaderboard(results.grandCalc, results.grandNative, results.premier);
+          if (results.topSkin) await submitTopSkin(results.topSkin, results.topSkinCalc);
+          await Promise.all([invLbCol.refresh(), topSkinLbCol.refresh()]);
           statusEl.textContent = `Done — grand total ${fmtByMode(results.grandCalc, getNumberFormat())} (submitted ✓)`;
         }
       } catch (err) {
@@ -1078,10 +1295,11 @@
     const pct = (100 / allCols.length).toFixed(4) + '%';
     allCols.forEach(c => { c.style.flex = `1 1 ${pct}`; c.style.maxWidth = pct; });
 
-    // If the scan menu is open, keep it anchored right after this row — a re-render of the
-    // row could otherwise leave the menu orphaned next to a stale/detached node.
-    if (scanMenuEl && scanMenuEl.previousElementSibling !== gridRoot) {
-      gridRoot.insertAdjacentElement('afterend', scanMenuEl);
+    // If the scan menu is open, keep the whole mega panel (scan column + both leaderboard
+    // columns) anchored right after this row — a re-render of the row could otherwise leave it
+    // orphaned next to a stale/detached node.
+    if (scanMegaEl && scanMegaEl.previousElementSibling !== gridRoot) {
+      gridRoot.insertAdjacentElement('afterend', scanMegaEl);
     }
   }
 
