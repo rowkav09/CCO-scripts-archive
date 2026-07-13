@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.16
+// @version      5.17
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -1348,7 +1348,10 @@
       btn.removeAttribute('id');
       btn.style.width = '100%';
       setButtonLabel(btn, 'Pricedata Scan');
-      btn.addEventListener('click', (e) => { e.stopPropagation(); toggleScanMenu(btn); });
+      // Blur right after handling the click — otherwise this button keeps keyboard focus after
+      // opening the menu, and a later Enter keypress (anywhere, not even related to this button)
+      // fires a synthetic click on it, re-triggering toggleScanMenu and closing the menu.
+      btn.addEventListener('click', (e) => { e.stopPropagation(); toggleScanMenu(btn); btn.blur(); });
       inner.appendChild(scanCol);
     }
 
