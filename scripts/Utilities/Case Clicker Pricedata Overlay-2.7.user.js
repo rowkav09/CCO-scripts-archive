@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.32
+// @version      5.33
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -1761,7 +1761,18 @@
         const trigger = nativeOptions.find(o => o !== currentlyActive) || nativeOptions[0];
         if (trigger) {
           suppressNextNativeReset = true;
-          trigger.click();
+          // Deferred via setTimeout, NOT called synchronously here — confirmed live that a
+          // synchronous trigger.click() from inside this same click handler silently produces
+          // NO network request at all (Mantine's Combobox appears to ignore/swallow a synthetic
+          // click on another option while still handling this one's own click event), even though
+          // that exact same DOM node responds normally to .click() from any other call site. This
+          // was the actual cause of the "completely broken" reports: Pricedata sort's forced-fetch
+          // never fired, silently leaving whatever cards were already on screen (from the last
+          // real native fetch, however old) to be re-priced and CSS-reordered among themselves —
+          // producing exactly the scrambled, wrong-magnitude, sometimes-nonexistent-item results
+          // reported. Deferring to the next tick lets Mantine finish handling this click first, so
+          // the synthetic one it fires immediately after is treated as a normal, independent click.
+          setTimeout(() => { trigger.click(); }, 0);
         } else {
           primeCurrentPage(); // no native option available to piggyback on — best effort fallback
         }
