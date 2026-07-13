@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.25
+// @version      5.26
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -1586,35 +1586,56 @@
       card.parentElement.style.order = rank != null ? String(rank) : '';
     });
 
-    // Self-heal: on a fresh load with Pricedata already active from a previous session, the
-    // site's own very first /api/inventory fetch can occasionally slip past our window.fetch
-    // patch before the patch is installed (a startup race @run-at document-start is meant to
-    // close, but isn't provably airtight against every timing scenario) — when that happens
-    // React renders whatever page it actually fetched in native order, which for an inventory
-    // spanning multiple pages is a DIFFERENT set of items than the true global top-N for this
-    // page. No amount of re-running applySort() fixes that: CSS `order` only reorders cards that
-    // are actually on screen, and most of them simply aren't the right items to begin with. A
-    // low fiber-match rate across a full page of cards is the signature of this happening. One
-    // corrective reload genuinely fixes it (the site's real fetch reliably lands after our
-    // by-then-fully-initialized patch) — gated by sessionStorage to fire at most once per tab
-    // session so a genuinely unfixable state can't turn into a reload loop. Cleared again once a
-    // load actually matches well, so a later, unrelated occurrence can still self-heal too.
+    // Self-heal (see scheduleSelfHealCheck below for why this exists and why it's debounced
+    // instead of judged on every tick).
     if (nativePageSkins.length >= 10 && cards.length >= Math.min(nativePageSkins.length, 10)) {
-      const matchRate = matched / cards.length;
-      try {
-        if (matchRate >= 0.5) {
-          sessionStorage.removeItem('cco_sortFixAttempted');
-        } else if (!sessionStorage.getItem('cco_sortFixAttempted')) {
-          sessionStorage.setItem('cco_sortFixAttempted', '1');
-          location.reload();
-        }
-      } catch (e) { /* storage blocked — just leave it CSS-reordered as best effort */ }
+      scheduleSelfHealCheck(matched, cards.length);
     }
+  }
+
+  // Checks, ONCE per page load, whether Pricedata sort ever actually matched the cards the site
+  // rendered — see applySort()'s call site. This used to judge match rate synchronously on every
+  // single tick, which sounds fine but isn't: while the page is still progressively mounting
+  // cards (images/data trickling in), the match rate is naturally unstable and swings above and
+  // below any threshold several times before settling. Judging it live meant occasionally
+  // triggering a reload, having the SAME transient instability during the reload's own initial
+  // render, triggering ANOTHER reload, and so on — a real loop a user actually hit (reported:
+  // "restart loop... never fully loads until around 5 tries"). Fix: only ever look at the LATEST
+  // snapshot, and only after 2s of no new tick has passed (the page has stopped changing), and
+  // only decide once total per load via selfHealDone — no re-arming, no live flapping.
+  let selfHealTimer = null;
+  let selfHealDone = false;
+  let selfHealLatest = null;
+  function scheduleSelfHealCheck(matched, cardCount) {
+    if (selfHealDone) return;
+    selfHealLatest = { matched, cardCount };
+    if (selfHealTimer) clearTimeout(selfHealTimer);
+    selfHealTimer = setTimeout(() => {
+      selfHealTimer = null;
+      if (selfHealDone || !selfHealLatest) return;
+      selfHealDone = true;
+      const { matched: m, cardCount: c } = selfHealLatest;
+      if (m / c < 0.5) {
+        try {
+          if (!sessionStorage.getItem('cco_sortFixAttempted')) {
+            sessionStorage.setItem('cco_sortFixAttempted', '1');
+            location.reload();
+          }
+        } catch (e) { /* storage blocked — leave it CSS-reordered as best effort */ }
+      }
+    }, 2000);
   }
 
   function setSortMode(mode) {
     sortMode = mode === 'pricedata' ? 'pricedata' : 'native';
     localStorage.setItem('cco_sortMode', sortMode);
+    // A real, deliberate click into Pricedata is a fresh attempt — let it self-heal again even
+    // if an earlier page load on this tab already used up its one auto-reload (see
+    // scheduleSelfHealCheck). Only clearing it here, never from passive tick-driven monitoring,
+    // is what keeps the self-heal from ever re-arming itself mid-load and looping.
+    if (sortMode === 'pricedata') {
+      try { sessionStorage.removeItem('cco_sortFixAttempted'); } catch (e) { /* ignore */ }
+    }
     scheduleTick();
   }
 
