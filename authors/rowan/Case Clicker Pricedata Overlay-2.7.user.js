@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.14
+// @version      5.15
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -339,15 +339,20 @@
     return { calc: price, native, source };
   }
 
+  // Whole dollars, floored (not rounded to nearest) — cents on a calculated price aren't
+  // meaningful precision here, they just make card badges/totals noisier to read. Used for
+  // every card badge, the inline total, tooltips, and both leaderboards (fmtByMode's own
+  // 'full' mode, Scan-menu only, calls this too).
   function fmtFull(n) {
-    if (n == null || isNaN(n)) return '$0.00';
-    return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (n == null || isNaN(n)) return '$0';
+    return '$' + Math.floor(n).toLocaleString('en-US');
   }
 
   // ---------- Display rounding (Pricedata Scan menu only) ----------
-  // Persisted display preference for the scan menu's numbers — Full (exact, with cents),
-  // Rounded (nearest whole dollar), or abbreviated to 2/3 significant figures (e.g. $1.8M /
-  // $1.82M). Doesn't touch card badges or the leaderboard — this only affects the menu.
+  // Persisted display preference for the scan menu's numbers — Full (whole dollars, floored —
+  // same as card badges), Rounded (nearest whole dollar, i.e. can round up unlike Full), or
+  // abbreviated to 2/3 significant figures (e.g. $1.8M / $1.82M). Doesn't touch card badges or
+  // the leaderboard directly — those always use fmtFull — this toggle only affects the menu.
   function getNumberFormat() {
     const v = localStorage.getItem('cco_numberFormat');
     return (v === 'rounded' || v === '2sf' || v === '3sf') ? v : 'full';
