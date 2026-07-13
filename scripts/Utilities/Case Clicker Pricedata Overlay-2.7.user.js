@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.33
+// @version      5.35
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -53,18 +53,15 @@
   let dataReady = false;
   let sheetLoadFailures = 0; // consecutive failed loadData() calls — drives the backoff below
 
-  // Deliberately NOT persisted across page loads (used to read this back from localStorage) —
-  // Pricedata being "sticky" as a remembered default was the root of a whole family of bugs:
-  // every fresh load/navigation had to somehow get Pricedata's global-sorted data in place before
-  // the site's own first fetch rendered cards, which was an inherently racy thing to guarantee.
-  // Starting every fresh load on native sort (the site's own actual default) means that race
-  // simply never has to be won — Pricedata is only ever active after the user explicitly clicks
-  // it on a page that's already fully loaded and running, which isn't racy at all.
-  let sortMode = 'native';
-  // See injectPricedataOption()'s custom-option click handler — set right before we synthetically
-  // click a real native option purely to trigger a genuine fetch, so that same native option's
-  // own click listener doesn't undo it by calling setSortMode('native') a moment later.
-  let suppressNextNativeReset = false;
+  // Deliberately NOT persisted across page loads via localStorage — Pricedata being "sticky" as
+  // a remembered default across EVERY future load/navigation was the root of a whole family of
+  // bugs (see below). The one exception is a single-use sessionStorage flag consumed immediately
+  // right here and removed right away — set only by the Pricedata option's own click handler
+  // right before a deliberate, one-time location.reload() (see injectPricedataOption below), so
+  // it can only ever affect the ONE reload it caused, never any later normal navigation.
+  const pendingPricedataReload = sessionStorage.getItem('cco_pendingPricedataReload') === '1';
+  if (pendingPricedataReload) sessionStorage.removeItem('cco_pendingPricedataReload');
+  let sortMode = pendingPricedataReload ? 'pricedata' : 'native';
   let nativePageSkins = [];   // last skins array actually fetched for the visible page, in server order
   let currentPageSkins = [];  // mirrors nativePageSkins; index i always pairs with the i-th .mantine-Card-root
                               // in DOM order (visual sort uses CSS `order`, so DOM order never changes)
@@ -1721,13 +1718,7 @@
     nativeOptions.forEach(o => {
       if (o.dataset.ccoNativeHooked) return;
       o.dataset.ccoNativeHooked = '1';
-      o.addEventListener('click', () => {
-        // See the custom Pricedata option's click handler below — it synthetically clicks one
-        // of these to force a real fetch while staying in Pricedata mode, which would otherwise
-        // immediately flip straight back to native right here.
-        if (suppressNextNativeReset) { suppressNextNativeReset = false; return; }
-        setSortMode('native');
-      });
+      o.addEventListener('click', () => { setSortMode('native'); });
     });
     let custom = dropdown.querySelector('[data-cco-option]');
     if (!custom) {
@@ -1738,44 +1729,40 @@
       custom.textContent = 'Pricedata';
       custom.addEventListener('click', (e) => {
         e.stopPropagation();
-        setSortMode('pricedata');
-        // Used to be location.reload() (jarring — lost scroll position), then just
-        // primeCurrentPage() (silent no-op most of the time): primeCurrentPage() only updates
-        // OUR OWN bookkeeping and CSS-reorders whatever cards are ALREADY rendered — it never
-        // makes React re-render with the correct item set. That's fine only when the currently
-        // displayed page happens to already show the exact same SET of items as the true global
-        // top-N for this page, which is basically never true once an inventory spans more than
-        // one page (confirmed live: switching straight from Latest to Pricedata left most cards
-        // unmatched and looking randomly ordered, with wrong-looking $0s among them purely
-        // because the wrong items were still on screen — that's what was actually being reported
-        // as "pricedata is completely broken").
+        // History here, because the fix keeps changing and each version taught something real:
         //
-        // Fix: force a genuine fetch the way every native sort option already reliably does,
-        // by synthetically clicking one of THEM — our window.fetch patch's Pricedata takeover
-        // (already proven correct for native sort changes) then swaps that real response with
-        // the true globally-sorted slice before React ever renders it, same as always. Suppress
-        // that option's own click handler just this once so it doesn't flip us back to native a
-        // moment later. Whichever native option isn't already the site's active selection is
-        // picked, since "selecting" the currently-active one may not fire a new request at all.
-        const currentlyActive = nativeOptions.find(o => o.getAttribute('aria-selected') === 'true' || o.hasAttribute('data-checked'));
-        const trigger = nativeOptions.find(o => o !== currentlyActive) || nativeOptions[0];
-        if (trigger) {
-          suppressNextNativeReset = true;
-          // Deferred via setTimeout, NOT called synchronously here — confirmed live that a
-          // synchronous trigger.click() from inside this same click handler silently produces
-          // NO network request at all (Mantine's Combobox appears to ignore/swallow a synthetic
-          // click on another option while still handling this one's own click event), even though
-          // that exact same DOM node responds normally to .click() from any other call site. This
-          // was the actual cause of the "completely broken" reports: Pricedata sort's forced-fetch
-          // never fired, silently leaving whatever cards were already on screen (from the last
-          // real native fetch, however old) to be re-priced and CSS-reordered among themselves —
-          // producing exactly the scrambled, wrong-magnitude, sometimes-nonexistent-item results
-          // reported. Deferring to the next tick lets Mantine finish handling this click first, so
-          // the synthetic one it fires immediately after is treated as a normal, independent click.
-          setTimeout(() => { trigger.click(); }, 0);
-        } else {
-          primeCurrentPage(); // no native option available to piggyback on — best effort fallback
-        }
+        // v1 was location.reload() — worked, but jarring (lost scroll position), so it got
+        // replaced with primeCurrentPage() (no reload, just re-labels/CSS-reorders whatever
+        // cards are ALREADY on screen). That's a silent no-op whenever the current page doesn't
+        // already happen to show the exact same item SET as the true global top-N, which is
+        // basically guaranteed once an inventory/SU spans more than one page — this was the
+        // "pricedata is completely broken" report.
+        //
+        // v2 (v5.30-v5.34) tried forcing a genuine fetch by synthetically clicking a real native
+        // sort option (proven reliable for actual user clicks) so our existing window.fetch
+        // takeover would catch and rewrite it. First cut clicked one option synchronously — proven
+        // live to be silently swallowed by Mantine's Combobox when called from inside another
+        // option's own click handler. Deferring via setTimeout fixed THAT, but then live testing
+        // (direct, real clicks included, no synthetic anything) showed selecting a sort value that
+        // was already fetched recently is ALSO a no-op — no network request at all — almost
+        // certainly a client-side cache/staleTime on the site's own data layer keeping every sort
+        // "fresh" once all of Latest/Price/Float/Float Ranks have each been visited once. Cycling
+        // through every other option didn't reliably help either, since ALL of them can end up
+        // cache-fresh at the same time. In short: there is no DOM interaction from inside the page
+        // that's guaranteed to force a real network request here — it depends on cache state we
+        // can't see or control.
+        //
+        // v3 (here): go back to a reload, but a single, deliberate, one-time one instead of the
+        // old always-reload-on-every-click v1. A fresh page load has no client-side cache to dodge
+        // — the very first request is always real, and @run-at document-start (see init()) already
+        // reliably intercepts and rewrites that exact first request, proven all session. Scroll
+        // position is saved and restored across the reload so it doesn't feel like v1's jump back
+        // to the top. This is a single user-initiated reload, not a self-triggering loop: nothing
+        // here or in init() can cause a SECOND automatic reload off the back of this one, which is
+        // what actually made the old self-heal mechanism (removed in v5.28) dangerous.
+        sessionStorage.setItem('cco_pendingPricedataReload', '1');
+        sessionStorage.setItem('cco_pendingScrollY', String(window.scrollY));
+        location.reload();
       });
       dropdown.appendChild(custom);
     }
@@ -2223,6 +2210,24 @@
     scheduleSheetRefresh();
     primeCurrentPage();
     scheduleTick();
+
+    // Restores scroll position after the one-time Pricedata reload (see injectPricedataOption's
+    // custom-option click handler) so switching to Pricedata doesn't feel like it jumps back to
+    // the top of the page. Cards mount progressively, so a single restore attempt right at init
+    // would likely land short of the real target once more content has loaded in — retry on a
+    // short interval for a few seconds, then stop regardless (a best-effort restore, not a
+    // persistent behavior — this key is one-time and already consumed by the point init() runs).
+    const pendingScrollY = sessionStorage.getItem('cco_pendingScrollY');
+    if (pendingScrollY != null) {
+      sessionStorage.removeItem('cco_pendingScrollY');
+      const targetY = parseInt(pendingScrollY, 10) || 0;
+      let attempts = 0;
+      const restoreTimer = setInterval(() => {
+        window.scrollTo(0, targetY);
+        attempts++;
+        if (attempts >= 20) clearInterval(restoreTimer); // ~4s of retries, then give up quietly
+      }, 200);
+    }
   }
 
   if (document.body) init();
