@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.20
+// @version      5.21
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -330,7 +330,12 @@
     } else if (!skin.patternId) {
       // No patternId: flat non-pattern 1/1 bonus only, nothing else. (patternId present but no
       // matching sheet row falls through here too: price stays at raw skin.price, no bonus.)
-      if (ranks[6] === 1 && ranks[7] === 1) price += 5000000;
+      // Floor, not add — matches the pattern branch's Math.max(5000000, price*15) treatment.
+      // This used to be `price += 5000000`, which tacked the item's small native price onto the
+      // flat bonus (e.g. a $500 pair of gloves showing as "$5,000,500") instead of the clean
+      // $5,000,000 a 1/1 is supposed to be worth — confirmed live against a real 1/1 Driver
+      // Gloves | Seigaiha (Field-Tested) that was displaying exactly that "$5,000,500" artifact.
+      if (ranks[6] === 1 && ranks[7] === 1) price = Math.max(5000000, price);
     }
 
     // Final unconditional overrides, applied regardless of branch above.
