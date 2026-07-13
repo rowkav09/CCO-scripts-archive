@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.12
+// @version      5.13
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -898,16 +898,12 @@
 
   // Closing used to also happen on any click outside the panel, which made it disappear when
   // clicking the blank page background around it (now that there's a wide 3-column panel, that
-  // dead space is much bigger). Closing is now explicit (the × button, or the Pricedata Scan
-  // button again via toggleScanMenu) or on page scroll (see onScanMenuScroll) — the panel is
-  // fixed/docked to the bottom of the screen now, so it no longer scrolls away with the page.
-  function onScanMenuScroll(e) {
-    if (scanMegaEl && e.target && e.target.nodeType === 1 && scanMegaEl.contains(e.target)) return;
-    closeScanMenu();
-  }
-
+  // dead space is much bigger). Closing is now only ever explicit: the × button, or clicking the
+  // Pricedata Scan button again (toggleScanMenu). The panel sits inline in the page (pushing the
+  // inventory cards below it down, not floating over them), so page scroll just scrolls it like
+  // any other content — it must NOT close on scroll, since scrolling down is exactly how you'd
+  // reach the cards that got pushed below it.
   function closeScanMenu() {
-    document.removeEventListener('scroll', onScanMenuScroll, true);
     if (scanMegaEl) { scanMegaEl.remove(); scanMegaEl = null; }
     scanMenuEl = null;
   }
@@ -1244,29 +1240,24 @@
       };
     });
 
-    // Fixed/docked to the bottom of the viewport (rather than inserted inline after the button
-    // row) so it always stays visible in the same spot regardless of scroll position, and its
-    // width scales with the window instead of being capped at a fixed pixel width — a bigger
-    // window means more room per column, so the storage-unit list needs less internal scrolling.
+    // Inserted inline right after the button row (not position:fixed) so opening this pushes the
+    // inventory cards below it down the page, same as before — the page scrolls normally to
+    // reach them. Width scales with the window instead of being capped at a fixed pixel width,
+    // so a bigger window means more room per column; each column also keeps its own max-height +
+    // overflow:auto (see buildLeaderboardColumn/panel styles), giving two independent scroll
+    // areas: the page itself (to get past the panel to the cards below), and each column's own
+    // internal scroll for lists longer than its max-height.
     const mega = document.createElement('div');
     mega.id = 'cco-scan-mega';
-    mega.style.cssText = 'display:flex;gap:12px;align-items:stretch;position:fixed;left:50%;bottom:16px;' +
-      'transform:translateX(-50%);width:min(94vw,1500px);max-height:min(80vh,calc(100vh - 100px));' +
-      'z-index:9999;';
+    mega.style.cssText = 'display:flex;gap:12px;align-items:stretch;width:min(94vw,1500px);' +
+      'max-height:min(80vh,900px);margin-top:8px;';
     mega.appendChild(panel);
     mega.appendChild(invLbCol.el);
     mega.appendChild(topSkinLbCol.el);
 
     scanMenuEl = panel;
     scanMegaEl = mega;
-    document.body.appendChild(mega);
-
-    // Closing on scroll mirrors the outside-click-to-close pattern this menu used to have
-    // (removed since the panel got bigger) — now that it's fixed/docked, staying open while the
-    // page scrolls underneath it feels broken, so any page scroll closes it. Scrolls that
-    // originate inside the menu itself (the scan column's own overflow:auto) are excluded so
-    // browsing the storage-unit list doesn't immediately close it.
-    document.addEventListener('scroll', onScanMenuScroll, true);
+    btn.closest('.mantine-Grid-root').insertAdjacentElement('afterend', mega);
 
     refreshScanMenuStorageUnits();
 
@@ -1341,10 +1332,11 @@
     const pct = (100 / allCols.length).toFixed(4) + '%';
     allCols.forEach(c => { c.style.flex = `1 1 ${pct}`; c.style.maxWidth = pct; });
 
-    // scanMegaEl (if open) is fixed-positioned directly on document.body, not anchored relative
-    // to this row, so there's nothing to re-parent here even if this row re-renders.
-    if (scanMegaEl && !document.body.contains(scanMegaEl)) {
-      document.body.appendChild(scanMegaEl);
+    // If the scan menu is open, keep the whole mega panel (scan column + both leaderboard
+    // columns) anchored right after this row — a re-render of the row could otherwise leave it
+    // orphaned next to a stale/detached node.
+    if (scanMegaEl && scanMegaEl.previousElementSibling !== gridRoot) {
+      gridRoot.insertAdjacentElement('afterend', scanMegaEl);
     }
   }
 
