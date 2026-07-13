@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.15
+// @version      5.16
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -515,8 +515,12 @@
   }
   function listUrlFor(ctx, page, sort) {
     const s = sort != null ? sort : getCurrentSortParam();
+    // Both list endpoints need showStickers/showUpgradedSkins — without them the API silently
+    // omits standalone/unapplied stickers (e.g. loose Katowice holos) and quality-scaled ("QS")
+    // skins entirely. The storage-unit endpoint was missing both params (main /api/inventory had
+    // them), so any SU containing loose stickers or QS skins under-reported its value.
     return ctx.type === 'su'
-      ? `/api/inventory/storageUnits/skins?id=${ctx.id}&page=${page}&sort=${encodeURIComponent(s)}`
+      ? `/api/inventory/storageUnits/skins?id=${ctx.id}&page=${page}&sort=${encodeURIComponent(s)}&showStickers=true&showUpgradedSkins=true`
       : `/api/inventory?page=${page}&sort=${encodeURIComponent(s)}&showStickers=true&showUpgradedSkins=true`;
   }
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
