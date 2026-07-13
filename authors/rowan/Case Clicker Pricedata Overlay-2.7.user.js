@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Case Clicker Pricedata Overlay
 // @namespace    cco-pricedata
-// @version      5.28
+// @version      5.29
 // @author       rowan
 // @credits      zhiro for basescript, chunkycheese for pricedata
 // @description  shows inv/su calculated value (pricedata x quality x event multiplier + stickers), optional pricedata-based sort toggle, calculated price on cards (hover for original QS price), a copy-link button on trade/chat/other-SU cards, and an opt-out inventory-value leaderboard with Premier tracking.
@@ -53,7 +53,14 @@
   let dataReady = false;
   let sheetLoadFailures = 0; // consecutive failed loadData() calls — drives the backoff below
 
-  let sortMode = localStorage.getItem('cco_sortMode') === 'pricedata' ? 'pricedata' : 'native';
+  // Deliberately NOT persisted across page loads (used to read this back from localStorage) —
+  // Pricedata being "sticky" as a remembered default was the root of a whole family of bugs:
+  // every fresh load/navigation had to somehow get Pricedata's global-sorted data in place before
+  // the site's own first fetch rendered cards, which was an inherently racy thing to guarantee.
+  // Starting every fresh load on native sort (the site's own actual default) means that race
+  // simply never has to be won — Pricedata is only ever active after the user explicitly clicks
+  // it on a page that's already fully loaded and running, which isn't racy at all.
+  let sortMode = 'native';
   let nativePageSkins = [];   // last skins array actually fetched for the visible page, in server order
   let currentPageSkins = [];  // mirrors nativePageSkins; index i always pairs with the i-th .mantine-Card-root
                               // in DOM order (visual sort uses CSS `order`, so DOM order never changes)
@@ -416,7 +423,21 @@
     document.body.appendChild(tooltipEl);
     return tooltipEl;
   }
-  function positionTooltip(e) { if (!tooltipEl) return; tooltipEl.style.left = (e.clientX + 12) + 'px'; tooltipEl.style.top = (e.clientY + 12) + 'px'; }
+  function positionTooltip(e) {
+    if (!tooltipEl) return;
+    const margin = 12;
+    // Always placed to the bottom-right of the cursor before — fine everywhere except near the
+    // right edge of the window (e.g. hovering a price badge in the last column of a wide grid),
+    // where a wide, white-space:nowrap tooltip like "Native price: $1,234,567.89" got clipped off
+    // the visible page. Position it, then measure its real rendered width and flip to the
+    // cursor's LEFT side if placing it to the right would run past the viewport edge.
+    tooltipEl.style.left = (e.clientX + margin) + 'px';
+    tooltipEl.style.top = (e.clientY + margin) + 'px';
+    const rect = tooltipEl.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+      tooltipEl.style.left = Math.max(0, e.clientX - margin - rect.width) + 'px';
+    }
+  }
   function attachTooltip(el, textFn) {
     el.addEventListener('mouseenter', (e) => { const t = ensureTooltip(); t.textContent = textFn(); t.style.display = 'block'; positionTooltip(e); });
     el.addEventListener('mousemove', positionTooltip);
@@ -1168,10 +1189,25 @@
         pagerEl.innerHTML = '';
         return;
       }
-      const totalPages = Math.max(1, Math.ceil(entries.length / LB_PAGE_SIZE));
+      // Page size used to be a flat LB_PAGE_SIZE (8) regardless of how much room the panel
+      // actually had — on anything wider than a small window the column had several hundred
+      // spare pixels below row 8 doing nothing, while entries 9+ needed an extra click to see.
+      // Measure one real row's rendered height and fit as many as the container can actually
+      // show instead. The probe row is removed immediately after measuring, before the real page
+      // renders, so it's never visibly shown.
+      const first = entries[Math.max(0, Math.min(page * LB_PAGE_SIZE, entries.length - 1))];
+      const firstMapped = mapEntry(first);
+      const probeRow = buildLeaderboardRow(first.rank, first.userId, first.avatarUrl, firstMapped.primaryText, firstMapped.secondaryText, firstMapped.rawValue);
+      listEl.appendChild(probeRow);
+      const rowHeight = probeRow.getBoundingClientRect().height || 34;
+      listEl.innerHTML = '';
+      const available = listEl.clientHeight;
+      const perPage = available > 0 ? Math.max(5, Math.floor(available / rowHeight)) : LB_PAGE_SIZE;
+
+      const totalPages = Math.max(1, Math.ceil(entries.length / perPage));
       page = Math.max(0, Math.min(page, totalPages - 1));
-      const start = page * LB_PAGE_SIZE;
-      entries.slice(start, start + LB_PAGE_SIZE).forEach(entry => {
+      const start = page * perPage;
+      entries.slice(start, start + perPage).forEach(entry => {
         const { primaryText, secondaryText, rawValue } = mapEntry(entry);
         listEl.appendChild(buildLeaderboardRow(entry.rank, entry.userId, entry.avatarUrl, primaryText, secondaryText, rawValue));
       });
@@ -1623,7 +1659,6 @@
 
   function setSortMode(mode) {
     sortMode = mode === 'pricedata' ? 'pricedata' : 'native';
-    localStorage.setItem('cco_sortMode', sortMode);
     scheduleTick();
   }
 
@@ -1661,10 +1696,20 @@
     if (!dropdown) return;
     const nativeOptions = [...dropdown.querySelectorAll('[role="option"]')].filter(o => !o.dataset.ccoOption);
     if (!nativeOptions.length) return;
-    if (!dropdown.dataset.ccoNativeHook) {
-      dropdown.dataset.ccoNativeHook = '1';
-      nativeOptions.forEach(o => o.addEventListener('click', () => setSortMode('native')));
-    }
+    // Hooked per-element (not once per dropdown container) — Mantine's combobox re-renders the
+    // option nodes themselves on every open even though the dropdown/portal container element
+    // stays the same, so a container-level "already hooked" flag left every option after the
+    // first dropdown open silently unlistened. That was the actual cause of "switching from
+    // Pricedata to Latest doesn't work (until you go via Price first)": clicking Latest directly
+    // hit a freshly-rendered, never-hooked option, so our sortMode never flipped back to native
+    // and Pricedata's takeover/CSS-reorder kept running against stale data. Re-checking every
+    // option, every open, and skipping only the individual ones already hooked fixes this for
+    // good regardless of whether Mantine reuses or recreates them.
+    nativeOptions.forEach(o => {
+      if (o.dataset.ccoNativeHooked) return;
+      o.dataset.ccoNativeHooked = '1';
+      o.addEventListener('click', () => setSortMode('native'));
+    });
     let custom = dropdown.querySelector('[data-cco-option]');
     if (!custom) {
       custom = nativeOptions[0].cloneNode(true);
